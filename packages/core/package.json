@@ -1,15 +1,24 @@
 {
   "name": "@ldesign/excel-viewer-core",
-  "version": "1.0.0",
-  "description": "Excel 预览编辑插件核心库",
+  "version": "2.0.0",
+  "description": "功能强大的 Excel 预览编辑插件核心库 - 支持公式计算、数据验证、查找替换等企业级功能",
   "main": "dist/index.cjs.js",
   "module": "dist/index.esm.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "build": "rollup -c ../../rollup.config.js --environment BUILD:core"
+    "build": "rollup -c ../../rollup.config.js --environment BUILD:core",
+    "build:prod": "NODE_ENV=production rollup -c ../../rollup.config.js --environment BUILD:core",
+    "dev": "rollup -c ../../rollup.config.js --environment BUILD:core --watch",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "xlsx": "^0.18.5",
@@ -19,10 +28,30 @@
   "keywords": [
     "excel",
     "spreadsheet",
-    "viewer"
+    "viewer",
+    "editor",
+    "xlsx",
+    "formula",
+    "validation",
+    "find-replace",
+    "i18n",
+    "performance",
+    "webworker"
   ],
   "author": "ldesign",
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ldesign/excel-viewer.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/ldesign/excel-viewer/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "sideEffects": false
 }
 
 

@@ -1,0 +1,44 @@
+# 依赖
+node_modules
+**/node_modules
+
+# 构建输出
+dist
+**/dist
+build
+**/build
+lib
+**/lib
+es
+**/es
+
+# 缓存
+.cache
+.rollup.cache
+*.tsbuildinfo
+
+# 日志
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 锁文件
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# 临时文件
+*.tmp
+*.temp
+
+# 编辑器
+.vscode
+.idea
+
+# 其他
+coverage
+.nyc_output
+
+

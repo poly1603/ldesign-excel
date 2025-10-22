@@ -370,4 +370,167 @@ export interface LuckysheetConfig {
   hook?: any;
 }
 
+/**
+ * 性能监控配置
+ */
+export interface PerformanceConfig {
+  /** 是否启用性能监控 */
+  enabled?: boolean;
+  /** 采样间隔(毫秒) */
+  sampleInterval?: number;
+  /** 性能阈值(毫秒) */
+  threshold?: number;
+  /** 回调函数 */
+  onMetric?: (metric: PerformanceMetric) => void;
+}
+
+/**
+ * 性能指标
+ */
+export interface PerformanceMetric {
+  /** 指标名称 */
+  name: string;
+  /** 耗时(毫秒) */
+  duration: number;
+  /** 时间戳 */
+  timestamp: number;
+  /** 额外信息 */
+  metadata?: Record<string, any>;
+}
+
+/**
+ * 虚拟滚动配置
+ */
+export interface VirtualScrollConfig {
+  /** 是否启用 */
+  enabled?: boolean;
+  /** 缓冲区大小(行数) */
+  bufferSize?: number;
+  /** 阈值(超过此行数启用虚拟滚动) */
+  threshold?: number;
+  /** 行高估算函数 */
+  estimateRowHeight?: (rowIndex: number) => number;
+  /** 列宽估算函数 */
+  estimateColWidth?: (colIndex: number) => number;
+}
+
+/**
+ * 协作配置
+ */
+export interface CollaborationConfig {
+  /** 是否启用协作 */
+  enabled?: boolean;
+  /** WebSocket URL */
+  url?: string;
+  /** 用户信息 */
+  user?: {
+    id: string;
+    name: string;
+    avatar?: string;
+    color?: string;
+  };
+  /** 心跳间隔(毫秒) */
+  heartbeatInterval?: number;
+  /** 自动重连 */
+  autoReconnect?: boolean;
+}
+
+/**
+ * 打印配置
+ */
+export interface PrintConfig {
+  /** 纸张大小 */
+  paperSize?: 'A4' | 'A3' | 'Letter' | 'Legal';
+  /** 方向 */
+  orientation?: 'portrait' | 'landscape';
+  /** 边距 */
+  margins?: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
+  /** 页眉 */
+  header?: string;
+  /** 页脚 */
+  footer?: string;
+  /** 缩放比例 */
+  scale?: number;
+  /** 是否打印网格线 */
+  gridLines?: boolean;
+  /** 是否打印行列标题 */
+  headings?: boolean;
+}
+
+/**
+ * 快捷键配置
+ */
+export interface KeyboardShortcut {
+  /** 快捷键组合 */
+  key: string;
+  /** 修饰键 */
+  modifiers?: {
+    ctrl?: boolean;
+    shift?: boolean;
+    alt?: boolean;
+    meta?: boolean;
+  };
+  /** 处理函数 */
+  handler: (event: KeyboardEvent) => void | boolean;
+  /** 描述 */
+  description?: string;
+  /** 是否禁用 */
+  disabled?: boolean;
+}
+
+/**
+ * 图表配置
+ */
+export interface ChartConfig {
+  /** 图表类型 */
+  type: 'line' | 'bar' | 'pie' | 'scatter' | 'area' | 'radar';
+  /** 数据范围 */
+  dataRange: {
+    sheetIndex: number;
+    startRow: number;
+    startCol: number;
+    endRow: number;
+    endCol: number;
+  };
+  /** 标题 */
+  title?: string;
+  /** X轴标签 */
+  xAxisLabel?: string;
+  /** Y轴标签 */
+  yAxisLabel?: string;
+  /** 图例位置 */
+  legendPosition?: 'top' | 'bottom' | 'left' | 'right' | 'none';
+  /** 颜色方案 */
+  colors?: string[];
+  /** 自定义选项 */
+  customOptions?: Record<string, any>;
+}
+
+/**
+ * 迷你图配置
+ */
+export interface SparklineConfig {
+  /** 类型 */
+  type: 'line' | 'column' | 'winloss';
+  /** 数据范围 */
+  dataRange: string;
+  /** 颜色 */
+  color?: string;
+  /** 负值颜色 */
+  negativeColor?: string;
+  /** 最高点颜色 */
+  highColor?: string;
+  /** 最低点颜色 */
+  lowColor?: string;
+  /** 宽度 */
+  width?: number;
+  /** 高度 */
+  height?: number;
+}
+
 

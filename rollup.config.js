@@ -20,8 +20,11 @@ const getBasePlugins = (tsconfig = {}) => [
   resolve({
     browser: true,
     preferBuiltins: false,
+    extensions: ['.ts', '.tsx', '.js', '.jsx'],
   }),
-  commonjs(),
+  commonjs({
+    include: /node_modules/,
+  }),
   typescript({
     tsconfig: './tsconfig.json',
     declaration: true,
@@ -33,7 +36,19 @@ const getBasePlugins = (tsconfig = {}) => [
     minimize: isProd,
     inject: true,
   }),
-  isProd && terser(),
+  isProd && terser({
+    compress: {
+      drop_console: true,
+      drop_debugger: true,
+      pure_funcs: ['console.log', 'console.debug'],
+    },
+    mangle: {
+      reserved: ['ExcelViewer', 'FormulaEngine', 'DataValidator'],
+    },
+    format: {
+      comments: false,
+    },
+  }),
 ].filter(Boolean);
 
 // 外部依赖配置

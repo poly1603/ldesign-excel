@@ -1,17 +1,34 @@
 {
-  "name": "excel-renderer",
-  "version": "0.1.0",
+  "name": "excel-viewer",
+  "version": "1.0.0",
   "private": true,
-  "description": "高性能Excel渲染插件 - Monorepo",
-  "author": "Excel Renderer Team",
+  "description": "高性能 Excel 文档预览插件，支持 Vue 3",
+  "author": "Excel Viewer Team",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ldesign/excel-viewer.git"
+  },
+  "keywords": [
+    "excel",
+    "xlsx",
+    "viewer",
+    "preview",
+    "spreadsheet",
+    "vue",
+    "canvas"
+  ],
   "engines": {
     "node": ">=18.0.0",
     "pnpm": ">=8.0.0"
   },
   "scripts": {
-    "dev": "pnpm --filter \"./packages/**\" run dev",
-    "build": "pnpm --filter \"./packages/**\" run build",
+    "dev": "pnpm --filter playground run dev",
+    "dev:core": "pnpm --filter @excel-viewer/core run dev",
+    "dev:vue": "pnpm --filter @excel-viewer/vue run dev",
+    "build": "pnpm run build:core && pnpm run build:vue",
+    "build:core": "pnpm --filter @excel-viewer/core run build",
+    "build:vue": "pnpm --filter @excel-viewer/vue run build",
     "test": "pnpm --filter \"./packages/**\" run test",
     "lint": "eslint . --ext .ts,.tsx,.vue",
     "format": "prettier --write \"**/*.{ts,tsx,vue,json,md}\"",

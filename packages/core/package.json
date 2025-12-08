@@ -1,45 +1,56 @@
 {
-  "name": "@excel-renderer/core",
-  "version": "0.1.0",
-  "description": "Excel渲染插件核心包 - 框架无关",
-  "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "name": "@excel-viewer/core",
+  "version": "1.0.0",
+  "description": "高性能 Excel 文档解析和渲染引擎，与框架无关",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./styles": "./dist/styles/index.css"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
-    "dev": "vite build --watch",
-    "build": "tsc && vite build",
-    "type-check": "tsc --noEmit",
+    "build": "rollup -c rollup.config.js",
+    "dev": "rollup -c rollup.config.js -w",
     "clean": "rimraf dist",
-    "test": "vitest"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest watch"
   },
   "keywords": [
     "excel",
+    "xlsx",
+    "xls",
+    "viewer",
     "spreadsheet",
-    "renderer",
-    "canvas",
-    "xlsx"
+    "parser",
+    "renderer"
   ],
-  "author": "Excel Renderer Team",
+  "author": "Excel Viewer Team",
   "license": "MIT",
   "dependencies": {
-    "xlsx": "^0.18.5"
+    "jszip": "^3.10.1",
+    "fflate": "^0.8.1"
   },
   "devDependencies": {
+    "@rollup/plugin-commonjs": "^25.0.7",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^11.1.5",
     "@types/node": "^20.10.0",
     "rimraf": "^5.0.5",
+    "rollup": "^4.1.4",
+    "rollup-plugin-postcss": "^4.0.2",
+    "tslib": "^2.6.2",
     "typescript": "^5.3.2",
-    "vite": "^5.0.5",
-    "vite-plugin-dts": "^3.6.4",
     "vitest": "^1.0.4"
   }
 }

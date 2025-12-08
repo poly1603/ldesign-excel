@@ -1,3 +1,2 @@
-export { useExcelRenderer } from './useExcelRenderer'
-export { useTheme } from './useTheme'
-export { useSelection } from './useSelection'
+export { useExcelViewer, type UseExcelViewerReturn } from './useExcelViewer';
+export { useFileDrop, type UseFileDropOptions, type UseFileDropReturn } from './useFileDrop';

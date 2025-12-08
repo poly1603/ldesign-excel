@@ -1,245 +1,397 @@
 <template>
-  <div ref="containerRef" class="excel-viewer" :class="themeClass">
-    <!-- Excel渲染容器 -->
+  <div ref="containerRef" class="excel-viewer-container" :style="containerStyle">
+    <slot name="loading" v-if="isLoading">
+      <div class="excel-viewer-loading-overlay">
+        <div class="excel-viewer-spinner"></div>
+        <span>{{ loadingText }}</span>
+      </div>
+    </slot>
+    <slot name="error" v-if="error" :error="error">
+      <div class="excel-viewer-error-overlay">
+        <span class="error-icon">⚠️</span>
+        <span>{{ error.message }}</span>
+        <button @click="retry" class="retry-btn">重试</button>
+      </div>
+    </slot>
   </div>
 </template>
 
-<script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { ExcelRenderer } from '@excel-renderer/core'
-import type {
-  WorkbookData,
-  Theme,
-  LocaleCode,
-  FeaturesConfig,
-  PerformanceConfig,
-  StyleConfig,
-} from '@excel-renderer/core'
+<script lang="ts">
+import { defineComponent, ref, computed, onMounted, onUnmounted, watch, type PropType } from 'vue';
+import {
+  ExcelViewer as CoreExcelViewer,
+  type ExcelViewerOptions,
+  type RenderOptions,
+  type ToolbarConfig,
+  type Workbook,
+  type Sheet,
+  type Cell,
+  type EventData,
+  type LoadEvent,
+  type LoadErrorEvent,
+  type SheetChangeEvent,
+  type CellClickEvent,
+  type SelectionChangeEvent,
+  type ZoomEvent
+} from '@excel-viewer/core';
 
-/**
- * ExcelViewer组件Props
- */
-export interface ExcelViewerProps {
-  /** Excel文件 */
-  file?: File
-  /** 工作簿数据 */
-  data?: WorkbookData
-  /** 主题 */
-  theme?: 'light' | 'dark' | Theme
-  /** 语言 */
-  locale?: LocaleCode
-  /** 是否可编辑 */
-  editable?: boolean
-  /** 功能配置 */
-  features?: FeaturesConfig
-  /** 性能配置 */
-  performance?: PerformanceConfig
-  /** 样式配置 */
-  styleConfig?: StyleConfig
-  /** 活动工作表索引 */
-  activeSheet?: number
-  /** 缩放级别 */
-  zoom?: number
-}
+export default defineComponent({
+  name: 'ExcelViewer',
 
-const props = withDefaults(defineProps<ExcelViewerProps>(), {
-  theme: 'light',
-  locale: 'zh-CN',
-  editable: false,
-  activeSheet: 0,
-  zoom: 1,
-})
+  props: {
+    /**
+     * Excel 文件 URL
+     */
+    src: {
+      type: String,
+      default: ''
+    },
 
-/**
- * ExcelViewer组件Emits
- */
-export interface ExcelViewerEmits {
-  (e: 'load', workbook: WorkbookData): void
-  (e: 'error', error: Error): void
-  (e: 'cell-click', event: any): void
-  (e: 'cell-double-click', event: any): void
-  (e: 'cell-change', event: any): void
-  (e: 'selection-change', event: any): void
-  (e: 'sheet-change', event: any): void
-  (e: 'scroll', event: any): void
-  (e: 'zoom', level: number): void
-}
+    /**
+     * Excel 文件对象
+     */
+    file: {
+      type: Object as PropType<File | null>,
+      default: null
+    },
 
-const emit = defineEmits<ExcelViewerEmits>()
+    /**
+     * Excel 文件数据
+     */
+    data: {
+      type: Object as PropType<ArrayBuffer | Uint8Array | null>,
+      default: null
+    },
 
-// Refs
-const containerRef = ref<HTMLElement>()
-let renderer: ExcelRenderer | null = null
+    /**
+     * 渲染选项
+     */
+    renderOptions: {
+      type: Object as PropType<Partial<RenderOptions>>,
+      default: () => ({})
+    },
 
-// Computed
-const themeClass = computed(() => {
-  const theme = typeof props.theme === 'string' ? props.theme : props.theme?.name
-  return `excel-viewer--${theme}`
-})
+    /**
+     * 工具栏配置
+     */
+    toolbar: {
+      type: Object as PropType<Partial<ToolbarConfig>>,
+      default: () => ({})
+    },
 
-/**
- * 初始化渲染器
- */
-function initRenderer() {
-  if (!containerRef.value) return
+    /**
+     * 是否只读
+     */
+    readonly: {
+      type: Boolean,
+      default: true
+    },
 
-  try {
-    renderer = new ExcelRenderer({
-      container: containerRef.value,
-      theme: props.theme,
-      locale: props.locale,
-      editable: props.editable,
-      features: props.features,
-      performance: props.performance,
-      style: props.styleConfig,
-      activeSheet: props.activeSheet,
-      zoom: props.zoom,
-      onLoad: (workbook) => emit('load', workbook),
-      onError: (error) => emit('error', error),
-      onCellClick: (event) => emit('cell-click', event),
-      onCellDoubleClick: (event) => emit('cell-double-click', event),
-      onCellChange: (event) => emit('cell-change', event),
-      onSelectionChange: (event) => emit('selection-change', event),
-      onSheetChange: (event) => emit('sheet-change', event),
-      onScroll: (event) => emit('scroll', event),
-      onZoom: (level) => emit('zoom', level),
-    })
+    /**
+     * 是否启用选择
+     */
+    enableSelection: {
+      type: Boolean,
+      default: true
+    },
 
-    // 如果提供了数据，加载它
-    if (props.data) {
-      renderer.loadData(props.data)
+    /**
+     * 缩放比例
+     */
+    zoom: {
+      type: Number,
+      default: 1
+    },
+
+    /**
+     * 当前工作表索引
+     */
+    sheetIndex: {
+      type: Number,
+      default: 0
+    },
+
+    /**
+     * 容器宽度
+     */
+    width: {
+      type: [String, Number],
+      default: '100%'
+    },
+
+    /**
+     * 容器高度
+     */
+    height: {
+      type: [String, Number],
+      default: '100%'
+    },
+
+    /**
+     * 加载中文本
+     */
+    loadingText: {
+      type: String,
+      default: '加载中...'
     }
-  } catch (error) {
-    console.error('初始化Excel渲染器失败:', error)
-    emit('error', error as Error)
-  }
-}
+  },
 
-/**
- * 销毁渲染器
- */
-function destroyRenderer() {
-  if (renderer) {
-    renderer.destroy()
-    renderer = null
-  }
-}
+  emits: [
+    'load',
+    'load-error',
+    'sheet-change',
+    'cell-click',
+    'cell-double-click',
+    'cell-right-click',
+    'selection-change',
+    'zoom-change',
+    'update:zoom',
+    'update:sheetIndex'
+  ],
 
-// Watch file changes
-watch(
-  () => props.file,
-  async (newFile) => {
-    if (newFile && renderer) {
-      try {
-        await renderer.loadFile(newFile)
-      } catch (error) {
-        console.error('加载Excel文件失败:', error)
+  setup(props, { emit, expose }) {
+    const containerRef = ref<HTMLElement | null>(null);
+    const viewer = ref<CoreExcelViewer | null>(null);
+    const isLoading = ref(false);
+    const error = ref<Error | null>(null);
+    const workbook = ref<Workbook | null>(null);
+
+    // 容器样式
+    const containerStyle = computed(() => ({
+      width: typeof props.width === 'number' ? `${props.width}px` : props.width,
+      height: typeof props.height === 'number' ? `${props.height}px` : props.height
+    }));
+
+    // 初始化查看器
+    const initViewer = () => {
+      if (!containerRef.value) return;
+
+      const options: ExcelViewerOptions = {
+        container: containerRef.value,
+        renderOptions: {
+          ...props.renderOptions,
+          zoom: props.zoom
+        },
+        toolbar: props.toolbar,
+        readonly: props.readonly,
+        enableSelection: props.enableSelection
+      };
+
+      viewer.value = new CoreExcelViewer(options);
+
+      // 绑定事件
+      viewer.value.on('load', (data: LoadEvent) => {
+        isLoading.value = false;
+        workbook.value = data.workbook;
+        emit('load', data);
+      });
+
+      viewer.value.on('loadError', (data: LoadErrorEvent) => {
+        isLoading.value = false;
+        error.value = data.error;
+        emit('load-error', data);
+      });
+
+      viewer.value.on('sheetChange', (data: SheetChangeEvent) => {
+        emit('sheet-change', data);
+        emit('update:sheetIndex', data.sheetIndex);
+      });
+
+      viewer.value.on('cellClick', (data: CellClickEvent) => {
+        emit('cell-click', data);
+      });
+
+      viewer.value.on('cellDoubleClick', (data: CellClickEvent) => {
+        emit('cell-double-click', data);
+      });
+
+      viewer.value.on('cellRightClick', (data: CellClickEvent) => {
+        emit('cell-right-click', data);
+      });
+
+      viewer.value.on('selectionChange', (data: SelectionChangeEvent) => {
+        emit('selection-change', data);
+      });
+
+      viewer.value.on('zoom', (data: ZoomEvent) => {
+        emit('zoom-change', data);
+        emit('update:zoom', data.zoom);
+      });
+    };
+
+    // 加载内容
+    const load = async () => {
+      console.log('[ExcelViewer.vue] load() called, viewer:', !!viewer.value, 'file:', !!props.file);
+      if (!viewer.value) {
+        console.log('[ExcelViewer.vue] viewer not ready');
+        return;
       }
-    }
-  }
-)
 
-// Watch data changes
-watch(
-  () => props.data,
-  (newData) => {
-    if (newData && renderer) {
-      renderer.loadData(newData)
-    }
-  }
-)
+      error.value = null;
+      isLoading.value = true;
 
-// Watch theme changes
-watch(
-  () => props.theme,
-  (newTheme) => {
-    if (renderer) {
-      renderer.setTheme(newTheme)
-    }
-  }
-)
-
-// Watch locale changes
-watch(
-  () => props.locale,
-  (newLocale) => {
-    if (renderer && newLocale) {
-      renderer.setLocale(newLocale)
-    }
-  }
-)
-
-// Watch activeSheet changes
-watch(
-  () => props.activeSheet,
-  (newIndex) => {
-    if (renderer && newIndex !== undefined) {
       try {
-        renderer.setActiveSheet(newIndex)
-      } catch (error) {
-        console.error('切换工作表失败:', error)
+        if (props.src) {
+          console.log('[ExcelViewer.vue] loading from src');
+          await viewer.value.loadUrl(props.src);
+        } else if (props.file) {
+          console.log('[ExcelViewer.vue] loading from file:', props.file.name);
+          await viewer.value.loadFile(props.file);
+        } else if (props.data) {
+          console.log('[ExcelViewer.vue] loading from data');
+          await viewer.value.loadData(props.data);
+        }
+        console.log('[ExcelViewer.vue] load completed');
+      } catch (e) {
+        console.error('[ExcelViewer.vue] load error:', e);
+        error.value = e as Error;
+        isLoading.value = false;
       }
-    }
+    };
+
+    // 重试
+    const retry = () => {
+      error.value = null;
+      load();
+    };
+
+    // 暴露的方法
+    const getViewer = () => viewer.value;
+    const getWorkbook = () => workbook.value;
+    const getCurrentSheet = (): Sheet | null => viewer.value?.getCurrentSheet() ?? null;
+    const getCell = (address: string): Cell | null => viewer.value?.getCell(address) ?? null;
+    const switchSheet = (index: number) => viewer.value?.switchSheet(index);
+    const setZoom = (zoom: number) => viewer.value?.setZoom(zoom);
+    const zoomIn = () => viewer.value?.zoomIn();
+    const zoomOut = () => viewer.value?.zoomOut();
+    const toggleFullscreen = () => viewer.value?.toggleFullscreen();
+    const print = () => viewer.value?.print();
+
+    // 监听数据源变化
+    watch(() => props.src, (newVal) => {
+      console.log('[ExcelViewer.vue] src changed:', newVal);
+      if (props.src) load();
+    });
+
+    watch(() => props.file, (newVal) => {
+      console.log('[ExcelViewer.vue] file changed:', newVal?.name);
+      if (props.file) load();
+    });
+
+    watch(() => props.data, (newVal) => {
+      console.log('[ExcelViewer.vue] data changed:', !!newVal);
+      if (props.data) load();
+    });
+
+    // 监听缩放变化
+    watch(() => props.zoom, (newZoom) => {
+      if (viewer.value && newZoom !== undefined) {
+        viewer.value.setZoom(newZoom);
+      }
+    });
+
+    // 监听工作表索引变化
+    watch(() => props.sheetIndex, (newIndex) => {
+      if (viewer.value && newIndex !== undefined) {
+        viewer.value.switchSheet(newIndex);
+      }
+    });
+
+    // 生命周期
+    onMounted(() => {
+      console.log('[ExcelViewer.vue] onMounted, file:', props.file?.name);
+      initViewer();
+      if (props.src || props.file || props.data) {
+        console.log('[ExcelViewer.vue] has data source, calling load()');
+        load();
+      }
+    });
+
+    onUnmounted(() => {
+      viewer.value?.destroy();
+      viewer.value = null;
+    });
+
+    // 暴露方法
+    expose({
+      getViewer,
+      getWorkbook,
+      getCurrentSheet,
+      getCell,
+      switchSheet,
+      setZoom,
+      zoomIn,
+      zoomOut,
+      toggleFullscreen,
+      print,
+      load,
+      retry
+    });
+
+    return {
+      containerRef,
+      isLoading,
+      error,
+      containerStyle,
+      retry
+    };
   }
-)
-
-// Lifecycle
-onMounted(() => {
-  initRenderer()
-
-  // 如果提供了文件，加载它
-  if (props.file && renderer) {
-    renderer.loadFile(props.file).catch((error) => {
-      console.error('加载Excel文件失败:', error)
-    })
-  }
-})
-
-onUnmounted(() => {
-  destroyRenderer()
-})
-
-// Expose methods
-defineExpose({
-  /** 获取渲染器实例 */
-  getRenderer: () => renderer,
-  /** 加载文件 */
-  loadFile: (file: File) => renderer?.loadFile(file),
-  /** 加载数据 */
-  loadData: (data: WorkbookData) => renderer?.loadData(data),
-  /** 设置活动工作表 */
-  setActiveSheet: (index: number) => renderer?.setActiveSheet(index),
-  /** 获取活动工作表 */
-  getActiveSheet: () => renderer?.getActiveSheet(),
-  /** 获取工作表数量 */
-  getSheetCount: () => renderer?.getSheetCount(),
-  /** 获取所有工作表名称 */
-  getSheetNames: () => renderer?.getSheetNames(),
-  /** 获取单元格值 */
-  getCellValue: (ref: string) => renderer?.getCellValue(ref),
-  /** 设置主题 */
-  setTheme: (theme: string | Theme) => renderer?.setTheme(theme),
-  /** 设置语言 */
-  setLocale: (locale: LocaleCode) => renderer?.setLocale(locale),
-})
+});
 </script>
 
 <style scoped>
-.excel-viewer {
-  width: 100%;
-  height: 100%;
+.excel-viewer-container {
   position: relative;
   overflow: hidden;
-  background-color: var(--excel-bg-color, #ffffff);
 }
 
-.excel-viewer--light {
-  --excel-bg-color: #ffffff;
-  --excel-text-color: #000000;
+.excel-viewer-loading-overlay,
+.excel-viewer-error-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.95);
+  z-index: 100;
+  gap: 12px;
 }
 
-.excel-viewer--dark {
-  --excel-bg-color: #1e1e1e;
-  --excel-text-color: #d4d4d4;
+.excel-viewer-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #2196f3;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.error-icon {
+  font-size: 48px;
+}
+
+.retry-btn {
+  padding: 8px 24px;
+  border: 1px solid #2196f3;
+  border-radius: 4px;
+  background: #2196f3;
+  color: white;
+  cursor: pointer;
+  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.retry-btn:hover {
+  background: #1976d2;
 }
 </style>

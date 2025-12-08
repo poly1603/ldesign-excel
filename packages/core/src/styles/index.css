@@ -1,0 +1,478 @@
+/**
+ * Excel Viewer 核心样式
+ */
+
+/* 根容器 */
+.excel-viewer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #333;
+  background: #fff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 工具栏 */
+.excel-viewer-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  background: linear-gradient(to bottom, #fafafa, #f0f0f0);
+  border-bottom: 1px solid #d0d0d0;
+  gap: 8px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.excel-viewer-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.excel-viewer-toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: #d0d0d0;
+  margin: 0 8px;
+}
+
+/* 按钮 */
+.excel-viewer-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #c0c0c0;
+  border-radius: 4px;
+  background: linear-gradient(to bottom, #fff, #f5f5f5);
+  color: #333;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  outline: none;
+}
+
+.excel-viewer-btn:hover {
+  background: linear-gradient(to bottom, #f5f5f5, #e8e8e8);
+  border-color: #b0b0b0;
+}
+
+.excel-viewer-btn:active {
+  background: linear-gradient(to bottom, #e8e8e8, #ddd);
+  border-color: #a0a0a0;
+}
+
+.excel-viewer-btn:focus-visible {
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.3);
+}
+
+.excel-viewer-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.excel-viewer-btn-icon {
+  font-size: 16px;
+}
+
+.excel-viewer-btn-text {
+  margin-left: 4px;
+}
+
+/* 缩放控件 */
+.excel-viewer-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.excel-viewer-zoom-label {
+  min-width: 50px;
+  text-align: center;
+  font-size: 12px;
+  color: #666;
+}
+
+/* 主视图区域 */
+.excel-viewer-main {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 滚动容器 */
+.excel-viewer-scroll {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 32px;
+  overflow: auto;
+}
+
+.excel-viewer-scroll::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.excel-viewer-scroll::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.excel-viewer-scroll::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 6px;
+  border: 2px solid #f1f1f1;
+}
+
+.excel-viewer-scroll::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+.excel-viewer-scroll::-webkit-scrollbar-corner {
+  background: #f1f1f1;
+}
+
+/* 滚动内容 */
+.excel-viewer-scroll-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+/* Canvas */
+.excel-viewer-canvas {
+  position: sticky;
+  top: 0;
+  left: 0;
+  display: block;
+}
+
+/* 工作表标签 */
+.excel-viewer-sheet-tabs {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  display: flex;
+  align-items: flex-end;
+  background: linear-gradient(to bottom, #e8e8e8, #d8d8d8);
+  border-top: 1px solid #c0c0c0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 8px;
+  gap: 2px;
+}
+
+.excel-viewer-sheet-tabs::-webkit-scrollbar {
+  height: 4px;
+}
+
+.excel-viewer-sheet-tabs::-webkit-scrollbar-thumb {
+  background: #b0b0b0;
+  border-radius: 2px;
+}
+
+.excel-viewer-sheet-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 16px;
+  border: 1px solid #c0c0c0;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: #e0e0e0;
+  color: #333;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  margin-bottom: -1px;
+  outline: none;
+}
+
+.excel-viewer-sheet-tab:hover {
+  background: #eaeaea;
+}
+
+.excel-viewer-sheet-tab.active,
+.excel-viewer-sheet-tab[data-active="true"] {
+  background: #fff;
+  border-bottom-color: #fff;
+  font-weight: 500;
+}
+
+.excel-viewer-sheet-tab:focus-visible {
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.3);
+}
+
+/* 加载状态 */
+.excel-viewer-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.95);
+  z-index: 1000;
+}
+
+.excel-viewer-loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #e0e0e0;
+  border-top-color: #2196f3;
+  border-radius: 50%;
+  animation: excel-viewer-spin 1s linear infinite;
+}
+
+.excel-viewer-loading-text {
+  margin-top: 12px;
+  color: #666;
+  font-size: 14px;
+}
+
+@keyframes excel-viewer-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 错误状态 */
+.excel-viewer-error {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  z-index: 1000;
+}
+
+.excel-viewer-error-icon {
+  font-size: 48px;
+  color: #f44336;
+  margin-bottom: 16px;
+}
+
+.excel-viewer-error-message {
+  color: #666;
+  font-size: 14px;
+  text-align: center;
+  max-width: 400px;
+}
+
+/* 空状态 */
+.excel-viewer-empty {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #fafafa;
+}
+
+.excel-viewer-empty-icon {
+  font-size: 64px;
+  color: #bdbdbd;
+  margin-bottom: 16px;
+}
+
+.excel-viewer-empty-text {
+  color: #9e9e9e;
+  font-size: 16px;
+}
+
+/* 右键菜单 */
+.excel-viewer-context-menu {
+  position: fixed;
+  min-width: 160px;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  z-index: 2000;
+}
+
+.excel-viewer-context-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.excel-viewer-context-menu-item:hover {
+  background: #f5f5f5;
+}
+
+.excel-viewer-context-menu-item-icon {
+  width: 20px;
+  margin-right: 8px;
+  text-align: center;
+}
+
+.excel-viewer-context-menu-item-text {
+  flex: 1;
+}
+
+.excel-viewer-context-menu-item-shortcut {
+  color: #999;
+  font-size: 12px;
+  margin-left: 16px;
+}
+
+.excel-viewer-context-menu-divider {
+  height: 1px;
+  background: #e0e0e0;
+  margin: 4px 0;
+}
+
+/* 提示框 */
+.excel-viewer-tooltip {
+  position: fixed;
+  max-width: 300px;
+  padding: 8px 12px;
+  background: #333;
+  color: #fff;
+  font-size: 12px;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 3000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.excel-viewer-tooltip.visible {
+  opacity: 1;
+}
+
+/* 搜索框 */
+.excel-viewer-search {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding: 4px;
+  z-index: 100;
+}
+
+.excel-viewer-search-input {
+  width: 200px;
+  padding: 6px 8px;
+  border: none;
+  outline: none;
+  font-size: 14px;
+}
+
+.excel-viewer-search-count {
+  padding: 0 8px;
+  color: #999;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* 暗色主题 */
+.excel-viewer.dark {
+  color: #e0e0e0;
+  background: #1e1e1e;
+}
+
+.excel-viewer.dark .excel-viewer-toolbar {
+  background: linear-gradient(to bottom, #2d2d2d, #252525);
+  border-bottom-color: #3a3a3a;
+}
+
+.excel-viewer.dark .excel-viewer-btn {
+  background: linear-gradient(to bottom, #3d3d3d, #333);
+  border-color: #4a4a4a;
+  color: #e0e0e0;
+}
+
+.excel-viewer.dark .excel-viewer-btn:hover {
+  background: linear-gradient(to bottom, #4a4a4a, #3d3d3d);
+}
+
+.excel-viewer.dark .excel-viewer-sheet-tabs {
+  background: linear-gradient(to bottom, #2d2d2d, #252525);
+  border-top-color: #3a3a3a;
+}
+
+.excel-viewer.dark .excel-viewer-sheet-tab {
+  background: #333;
+  border-color: #4a4a4a;
+  color: #e0e0e0;
+}
+
+.excel-viewer.dark .excel-viewer-sheet-tab.active {
+  background: #1e1e1e;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .excel-viewer-toolbar {
+    padding: 6px 8px;
+    gap: 4px;
+  }
+
+  .excel-viewer-btn {
+    min-width: 28px;
+    height: 28px;
+  }
+
+  .excel-viewer-zoom-label {
+    display: none;
+  }
+
+  .excel-viewer-sheet-tab {
+    padding: 4px 12px;
+    font-size: 11px;
+  }
+}
+
+/* 打印样式 */
+@media print {
+
+  .excel-viewer-toolbar,
+  .excel-viewer-sheet-tabs {
+    display: none !important;
+  }
+
+  .excel-viewer-scroll {
+    bottom: 0 !important;
+    overflow: visible !important;
+  }
+
+  .excel-viewer-canvas {
+    position: static !important;
+  }
+}

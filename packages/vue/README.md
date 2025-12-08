@@ -1,235 +1,252 @@
-# @excel-renderer/vue
+# @excel-viewer/vue
 
-Excel渲染插件的Vue 3适配包。
+Excel 文档查看器 Vue 3 组件，基于 @excel-viewer/core 封装。
+
+## 特性
+
+- 🎯 **Vue 3 组件** - 开箱即用的 Vue 3 组件
+- 🪝 **Composables** - 提供 useExcelViewer、useFileDrop 等 hooks
+- 📦 **TypeScript** - 完整的类型定义
+- 🔄 **响应式** - 支持 v-model 双向绑定
+- 🎨 **插槽支持** - 自定义加载和错误状态
 
 ## 安装
 
 ```bash
-npm install @excel-renderer/vue
+npm install @excel-viewer/vue
 # 或
-pnpm add @excel-renderer/vue
+pnpm add @excel-viewer/vue
+# 或
+yarn add @excel-viewer/vue
 ```
 
 ## 快速开始
 
-### 基础使用
+### 组件方式
 
 ```vue
 <template>
-  <div class="app">
-    <input type="file" @change="handleFileChange" accept=".xlsx,.xls,.csv" />
-    
-    <ExcelViewer
-      :file="file"
-      :theme="theme"
-      :locale="locale"
-      @load="handleLoad"
-      @cell-click="handleCellClick"
-    />
+  <ExcelViewer
+    :src="fileUrl"
+    :width="800"
+    :height="600"
+    v-model:zoom="zoom"
+    v-model:sheet-index="sheetIndex"
+    @load="handleLoad"
+    @cell-click="handleCellClick"
+  />
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import { ExcelViewer } from '@excel-viewer/vue';
+import '@excel-viewer/vue/styles';
+
+const fileUrl = ref('/path/to/file.xlsx');
+const zoom = ref(1);
+const sheetIndex = ref(0);
+
+const handleLoad = (data) => {
+  console.log('加载完成', data.workbook);
+};
+
+const handleCellClick = (data) => {
+  console.log('点击单元格', data.address);
+};
+</script>
+```
+
+### Composable 方式
+
+```vue
+<template>
+  <div ref="containerRef" style="width: 100%; height: 600px;"></div>
+  <input type="file" @change="handleFileChange" accept=".xlsx,.xls" />
+</template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue';
+import { useExcelViewer } from '@excel-viewer/vue';
+import '@excel-viewer/vue/styles';
+
+const containerRef = ref<HTMLElement | null>(null);
+
+const {
+  init,
+  loadFile,
+  workbook,
+  currentSheet,
+  zoom,
+  setZoom
+} = useExcelViewer();
+
+onMounted(() => {
+  if (containerRef.value) {
+    init({
+      container: containerRef.value,
+      toolbar: { visible: true }
+    });
+  }
+});
+
+const handleFileChange = async (e: Event) => {
+  const file = (e.target as HTMLInputElement).files?.[0];
+  if (file) {
+    await loadFile(file);
+  }
+};
+</script>
+```
+
+### 文件拖放
+
+```vue
+<template>
+  <div
+    ref="dropRef"
+    :class="['drop-zone', { dragging: isDragging }]"
+  >
+    <p v-if="!files.length">拖放 Excel 文件到这里</p>
+    <p v-else>已选择: {{ files[0].name }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
-import { ExcelViewer } from '@excel-renderer/vue'
+import { useFileDrop } from '@excel-viewer/vue';
 
-const file = ref<File>()
-const theme = ref('light')
-const locale = ref('zh-CN')
-
-function handleFileChange(e: Event) {
-  const target = e.target as HTMLInputElement
-  file.value = target.files?.[0]
-}
-
-function handleLoad(workbook) {
-  console.log('加载完成:', workbook.sheets.length, '个工作表')
-}
-
-function handleCellClick(event) {
-  console.log('点击单元格:', event.cell.ref, event.cell.value)
-}
+const { dropRef, isDragging, files } = useFileDrop({
+  onDrop: (files) => {
+    console.log('拖放文件:', files);
+  }
+});
 </script>
 
-<style>
-.app {
-  width: 100vw;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
+<style scoped>
+.drop-zone {
+  border: 2px dashed #ccc;
+  padding: 40px;
+  text-align: center;
 }
-
-.excel-viewer {
-  flex: 1;
+.drop-zone.dragging {
+  border-color: #2196f3;
+  background: rgba(33, 150, 243, 0.1);
 }
 </style>
 ```
 
-### 使用Composables
-
-```vue
-<script setup lang="ts">
-import { ref } from 'vue'
-import { useExcelRenderer, useTheme } from '@excel-renderer/vue'
-
-const container = ref<HTMLElement>()
-
-// 使用渲染器
-const {
-  renderer,
-  isLoading,
-  error,
-  loadFile,
-  getCellValue,
-  setActiveSheet,
-} = useExcelRenderer({
-  container: container.value!,
-  theme: 'light',
-  locale: 'zh-CN',
-})
-
-// 使用主题
-const { currentTheme, setTheme, toggleTheme } = useTheme()
-
-// 加载文件
-async function handleLoadFile(file: File) {
-  await loadFile(file)
-}
-
-// 切换主题
-function handleToggleTheme() {
-  toggleTheme()
-  if (renderer.value) {
-    renderer.value.setTheme(currentTheme.value)
-  }
-}
-</script>
-```
-
-## API
-
-### ExcelViewer 组件
-
-#### Props
+## 组件 Props
 
 | 属性 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `file` | `File` | - | Excel文件 |
-| `data` | `WorkbookData` | - | 工作簿数据 |
-| `theme` | `'light' \| 'dark' \| Theme` | `'light'` | 主题 |
-| `locale` | `LocaleCode` | `'zh-CN'` | 语言 |
-| `editable` | `boolean` | `false` | 是否可编辑 |
-| `features` | `FeaturesConfig` | - | 功能配置 |
-| `performance` | `PerformanceConfig` | - | 性能配置 |
-| `styleConfig` | `StyleConfig` | - | 样式配置 |
-| `activeSheet` | `number` | `0` | 活动工作表索引 |
-| `zoom` | `number` | `1` | 缩放级别 |
+| `src` | `string` | `''` | Excel 文件 URL |
+| `file` | `File` | `null` | Excel 文件对象 |
+| `data` | `ArrayBuffer` | `null` | Excel 文件二进制数据 |
+| `renderOptions` | `RenderOptions` | `{}` | 渲染选项 |
+| `toolbar` | `ToolbarConfig` | `{}` | 工具栏配置 |
+| `readonly` | `boolean` | `true` | 是否只读 |
+| `enableSelection` | `boolean` | `true` | 是否启用选择 |
+| `zoom` | `number` | `1` | 缩放比例 (支持 v-model) |
+| `sheetIndex` | `number` | `0` | 工作表索引 (支持 v-model) |
+| `width` | `string \| number` | `'100%'` | 容器宽度 |
+| `height` | `string \| number` | `'100%'` | 容器高度 |
+| `loadingText` | `string` | `'加载中...'` | 加载文本 |
 
-#### Events
+## 组件事件
 
 | 事件 | 参数 | 说明 |
 |------|------|------|
-| `load` | `(workbook: WorkbookData)` | 加载完成 |
-| `error` | `(error: Error)` | 错误 |
-| `cell-click` | `(event: CellClickEvent)` | 单元格点击 |
-| `cell-double-click` | `(event: CellDoubleClickEvent)` | 单元格双击 |
-| `cell-change` | `(event: CellChangeEvent)` | 单元格值变化 |
-| `selection-change` | `(event: SelectionChangeEvent)` | 选择变化 |
-| `sheet-change` | `(event: SheetChangeEvent)` | 工作表切换 |
-| `scroll` | `(event: ScrollEvent)` | 滚动 |
-| `zoom` | `(level: number)` | 缩放 |
+| `load` | `LoadEvent` | 加载完成 |
+| `load-error` | `LoadErrorEvent` | 加载失败 |
+| `sheet-change` | `SheetChangeEvent` | 工作表切换 |
+| `cell-click` | `CellClickEvent` | 单元格点击 |
+| `cell-double-click` | `CellClickEvent` | 单元格双击 |
+| `cell-right-click` | `CellClickEvent` | 单元格右键 |
+| `selection-change` | `SelectionChangeEvent` | 选区变化 |
+| `zoom-change` | `ZoomEvent` | 缩放变化 |
 
-#### Methods
-
-通过组件ref访问：
+## 组件插槽
 
 ```vue
-<script setup>
-import { ref } from 'vue'
+<ExcelViewer :src="fileUrl">
+  <!-- 自定义加载状态 -->
+  <template #loading>
+    <div class="custom-loading">正在加载...</div>
+  </template>
 
-const viewerRef = ref()
+  <!-- 自定义错误状态 -->
+  <template #error="{ error }">
+    <div class="custom-error">
+      <p>加载失败: {{ error.message }}</p>
+      <button @click="retry">重试</button>
+    </div>
+  </template>
+</ExcelViewer>
+```
 
-function doSomething() {
-  const renderer = viewerRef.value?.getRenderer()
-  const sheet = viewerRef.value?.getActiveSheet()
-  const value = viewerRef.value?.getCellValue('A1')
-}
-</script>
+## 组件方法
 
+通过 ref 访问组件实例方法：
+
+```vue
 <template>
-  <ExcelViewer ref="viewerRef" :file="file" />
+  <ExcelViewer ref="viewerRef" :src="fileUrl" />
+  <button @click="handleZoomIn">放大</button>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import { ExcelViewer } from '@excel-viewer/vue';
+
+const viewerRef = ref<InstanceType<typeof ExcelViewer> | null>(null);
+
+const handleZoomIn = () => {
+  viewerRef.value?.zoomIn();
+};
+</script>
+```
+
+可用方法：
+- `getViewer()` - 获取核心查看器实例
+- `getWorkbook()` - 获取工作簿
+- `getCurrentSheet()` - 获取当前工作表
+- `getCell(address)` - 获取单元格
+- `switchSheet(index)` - 切换工作表
+- `setZoom(zoom)` - 设置缩放
+- `zoomIn()` - 放大
+- `zoomOut()` - 缩小
+- `toggleFullscreen()` - 切换全屏
+- `print()` - 打印
+- `load()` - 重新加载
+- `retry()` - 重试加载
+
+## 插件安装
+
+```typescript
+import { createApp } from 'vue';
+import App from './App.vue';
+import ExcelViewerPlugin from '@excel-viewer/vue';
+import '@excel-viewer/vue/styles';
+
+const app = createApp(App);
+app.use(ExcelViewerPlugin);
+app.mount('#app');
+```
+
+然后可以直接在模板中使用：
+
+```vue
+<template>
+  <ExcelViewer :src="fileUrl" />
 </template>
 ```
 
-### Composables
+## 浏览器支持
 
-#### useExcelRenderer
+- Chrome >= 80
+- Firefox >= 75
+- Safari >= 13
+- Edge >= 80
 
-```typescript
-const {
-  container,        // 容器ref
-  renderer,         // 渲染器实例
-  isLoading,        // 加载状态
-  error,            // 错误信息
-  workbook,         // 工作簿数据
-  loadFile,         // 加载文件
-  loadData,         // 加载数据
-  getCellValue,     // 获取单元格值
-  setActiveSheet,   // 设置活动工作表
-  getActiveSheet,   // 获取活动工作表
-  getSheetCount,    // 获取工作表数量
-  getSheetNames,    // 获取工作表名称
-  setTheme,         // 设置主题
-  setLocale,        // 设置语言
-  t,                // 翻译函数
-} = useExcelRenderer(options)
-```
-
-#### useTheme
-
-```typescript
-const {
-  currentTheme,     // 当前主题
-  customThemes,     // 自定义主题
-  setTheme,         // 设置主题
-  registerTheme,    // 注册主题
-  getTheme,         // 获取主题
-  toggleTheme,      // 切换主题
-} = useTheme('light')
-```
-
-#### useSelection
-
-```typescript
-const {
-  selection,         // 选择状态
-  selectCell,        // 选择单元格
-  selectRange,       // 选择区域
-  getSelectedData,   // 获取选中数据
-  clearSelection,    // 清除选择
-  updateSelection,   // 更新选择
-} = useSelection(renderer)
-```
-
-## 类型定义
-
-所有类型定义都从 `@excel-renderer/core` 导出：
-
-```typescript
-import type {
-  WorkbookData,
-  SheetData,
-  CellData,
-  CellStyle,
-  Theme,
-  LocaleCode,
-} from '@excel-renderer/vue'
-```
-
-## 示例
-
-查看 `examples/vue-demo` 目录获取完整示例。
-
-## License
+## 许可证
 
 MIT

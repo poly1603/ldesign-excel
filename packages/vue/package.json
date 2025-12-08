@@ -1,52 +1,57 @@
 {
-  "name": "@excel-renderer/vue",
-  "version": "0.1.0",
-  "description": "Excel渲染插件Vue适配包",
-  "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "name": "@excel-viewer/vue",
+  "version": "1.0.0",
+  "description": "Excel 文档查看器 Vue 3 组件",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./styles": "./dist/styles/index.css"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
-    "dev": "vite build --watch",
-    "build": "vue-tsc && vite build",
-    "type-check": "vue-tsc --noEmit",
+    "build": "rollup -c rollup.config.js",
+    "dev": "rollup -c rollup.config.js -w",
     "clean": "rimraf dist",
-    "test": "vitest"
+    "type-check": "vue-tsc --noEmit"
   },
   "keywords": [
     "excel",
-    "spreadsheet",
+    "xlsx",
+    "viewer",
     "vue",
     "vue3",
-    "component"
+    "spreadsheet",
+    "fortune-sheet"
   ],
-  "author": "Excel Renderer Team",
+  "author": "Excel Viewer Team",
   "license": "MIT",
+  "dependencies": {
+    "@excel-viewer/core": "workspace:*"
+  },
   "peerDependencies": {
     "vue": "^3.3.0"
   },
-  "dependencies": {
-    "@excel-renderer/core": "workspace:*",
-    "@vueuse/core": "^10.7.0"
-  },
   "devDependencies": {
-    "@types/node": "^20.10.0",
-    "@vitejs/plugin-vue": "^4.5.0",
+    "@rollup/plugin-commonjs": "^25.0.7",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^11.1.5",
+    "@vue/compiler-sfc": "^3.3.4",
     "rimraf": "^5.0.5",
+    "rollup": "^4.1.4",
+    "rollup-plugin-postcss": "^4.0.2",
+    "rollup-plugin-vue": "^6.0.0",
     "typescript": "^5.3.2",
-    "vite": "^5.0.5",
-    "vite-plugin-dts": "^3.6.4",
-    "vitest": "^1.0.4",
-    "vue": "^3.3.10",
-    "vue-tsc": "^1.8.25"
+    "vue": "^3.3.4",
+    "vue-tsc": "^1.8.0"
   }
 }

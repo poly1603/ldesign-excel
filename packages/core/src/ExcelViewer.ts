@@ -26,6 +26,8 @@ import { ExcelParser } from './parser/ExcelParser';
 import { SheetRenderer } from './renderer/SheetRenderer';
 import { DomRenderer } from './renderer/DomRenderer';
 import { EventEmitter, type EventListener } from './events/EventEmitter';
+import { Toolbar, createDefaultToolbarItems } from './core/ui/Toolbar';
+import { FormulaBar } from './core/ui/FormulaBar';
 
 /**
  * 渲染模式
@@ -72,6 +74,11 @@ export class ExcelViewer {
   private sheetTabsElement: HTMLElement | null = null;
   private scrollContainer: HTMLElement | null = null;
   private scrollContent: HTMLElement | null = null;
+
+  // 工具栏和公式栏
+  private toolbar: Toolbar | null = null;
+  private formulaBar: FormulaBar | null = null;
+  private formulaBarElement: HTMLElement | null = null;
 
   // 状态
   private isLoading: boolean = false;
@@ -143,10 +150,29 @@ export class ExcelViewer {
       background: ${this.getTheme().backgroundColor};
     `;
 
-    // 创建工具栏
+    // 创建 WPS 风格工具栏
     if (this.toolbarConfig.visible) {
-      this.toolbarElement = this.createToolbar();
+      // 工具栏容器
+      this.toolbarElement = document.createElement('div');
+      this.toolbarElement.className = 'excel-toolbar-container';
+      this.toolbarElement.style.cssText = `flex-shrink: 0;`;
       this.rootElement.appendChild(this.toolbarElement);
+
+      // 创建 Toolbar 组件
+      this.toolbar = new Toolbar(this.toolbarElement, {
+        items: createDefaultToolbarItems(),
+        onAction: (id, value) => this.handleToolbarAction(id, value)
+      });
+
+      // 创建公式栏
+      this.formulaBarElement = document.createElement('div');
+      this.formulaBarElement.className = 'excel-formula-bar-container';
+      this.rootElement.appendChild(this.formulaBarElement);
+
+      this.formulaBar = new FormulaBar(this.formulaBarElement, {
+        onValueChange: (value: string) => this.handleFormulaChange(value),
+        onConfirm: (value: string) => this.handleFormulaConfirm(value)
+      });
     }
 
     // 创建主视图容器
@@ -984,6 +1010,147 @@ export class ExcelViewer {
     if (loading) {
       loading.remove();
     }
+  }
+
+  /**
+   * 处理工具栏操作
+   */
+  private handleToolbarAction(id: string, value?: string): void {
+    if (!this.domRenderer) return;
+
+    switch (id) {
+      // 格式操作
+      case 'bold':
+        this.domRenderer.applyFormat('fontWeight', 'bold');
+        break;
+      case 'italic':
+        this.domRenderer.applyFormat('fontStyle', 'italic');
+        break;
+      case 'underline':
+        this.domRenderer.applyFormat('textDecoration', 'underline');
+        break;
+      case 'strikethrough':
+        this.domRenderer.applyFormat('textDecoration', 'line-through');
+        break;
+
+      // 对齐
+      case 'alignLeft':
+        this.domRenderer.applyFormat('textAlign', 'left');
+        break;
+      case 'alignCenter':
+        this.domRenderer.applyFormat('textAlign', 'center');
+        break;
+      case 'alignRight':
+        this.domRenderer.applyFormat('textAlign', 'right');
+        break;
+
+      // 颜色
+      case 'textColor':
+        if (value) this.domRenderer.applyFormat('color', value);
+        break;
+      case 'fillColor':
+        if (value) this.domRenderer.applyFormat('backgroundColor', value);
+        break;
+
+      // 边框
+      case 'border':
+        this.domRenderer.applyFormat('border', '1px solid #000');
+        break;
+
+      // 合并单元格
+      case 'merge':
+        this.domRenderer.mergeSelectedCells();
+        break;
+
+      // 数字格式
+      case 'formatNumber':
+        this.domRenderer.applyNumberFormat('percent');
+        break;
+      case 'formatCurrency':
+        this.domRenderer.applyNumberFormat('currency');
+        break;
+      case 'formatDate':
+        this.domRenderer.applyNumberFormat('date');
+        break;
+
+      // 字体
+      case 'fontFamily':
+        if (value) this.domRenderer.applyFormat('fontFamily', value);
+        break;
+      case 'fontSize':
+        if (value) this.domRenderer.applyFormat('fontSize', `${value}px`);
+        break;
+
+      // 插入操作
+      case 'insertLink':
+        this.showInsertLinkDialog();
+        break;
+      case 'insertImage':
+        this.showInsertImageDialog();
+        break;
+      case 'insertChart':
+        this.showInsertChartDialog();
+        break;
+      case 'insertComment':
+        this.domRenderer.insertComment();
+        break;
+
+      // 筛选排序
+      case 'filter':
+        this.domRenderer.toggleFilter();
+        break;
+      case 'sort':
+        this.domRenderer.showSortDialog();
+        break;
+
+      default:
+        console.log('Toolbar action:', id, value);
+    }
+  }
+
+  private showInsertLinkDialog(): void {
+    const url = prompt('请输入链接地址:', 'https://');
+    if (url && this.domRenderer) {
+      this.domRenderer.insertLink(url);
+    }
+  }
+
+  private showInsertImageDialog(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file && this.domRenderer) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          this.domRenderer?.insertImage(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+    input.click();
+  }
+
+  private showInsertChartDialog(): void {
+    alert('图表功能开发中...');
+  }
+
+  /**
+   * 处理公式栏值变化
+   */
+  private handleFormulaChange(_value: string): void {
+    // 实时更新预览
+  }
+
+  /**
+   * 处理公式栏确认
+   */
+  private handleFormulaConfirm(value: string): void {
+    if (!this.domRenderer) return;
+
+    const activeCell = this.domRenderer.getActiveCell();
+    this.domRenderer.setCellValue(activeCell.row, activeCell.col, value);
   }
 
   /**

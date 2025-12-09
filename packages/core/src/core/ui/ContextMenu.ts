@@ -2,6 +2,8 @@
  * 右键菜单组件
  */
 
+import { createIcon } from './Icons';
+
 export interface MenuItem {
   /** 菜单项 ID */
   id: string;
@@ -43,7 +45,7 @@ export class ContextMenu {
     this.container = container;
     this.options = {
       width: 200,
-      zIndex: 1000,
+      zIndex: 99999,
       ...options
     };
 
@@ -59,13 +61,15 @@ export class ContextMenu {
   }
 
   private handleDocumentClick(e: MouseEvent): void {
-    if (this.visible && this.menuElement && !this.menuElement.contains(e.target as Node)) {
+    // 检查菜单是否存在且点击不在菜单内
+    if (this.menuElement && !this.menuElement.contains(e.target as Node)) {
       this.hide();
     }
   }
 
-  private handleDocumentContextMenu(e: MouseEvent): void {
-    if (this.visible && this.menuElement && !this.menuElement.contains(e.target as Node)) {
+  private handleDocumentContextMenu(_e: MouseEvent): void {
+    // 右键点击时先关闭现有菜单
+    if (this.menuElement) {
       this.hide();
     }
   }
@@ -98,7 +102,10 @@ export class ContextMenu {
     this.menuElement.style.left = `${Math.max(0, left)}px`;
     this.menuElement.style.top = `${Math.max(0, top)}px`;
 
-    this.visible = true;
+    // 延迟设置 visible，避免被同一次事件的 document contextmenu 处理器关闭
+    requestAnimationFrame(() => {
+      this.visible = true;
+    });
   }
 
   /**
@@ -161,7 +168,7 @@ export class ContextMenu {
   /**
    * 创建菜单项元素
    */
-  private createMenuItem(item: MenuItem): HTMLElement {
+  private createMenuItem(item: MenuItem, parentMenu?: HTMLElement): HTMLElement {
     const menuItem = document.createElement('div');
     menuItem.className = 'spreadsheet-context-menu-item';
     menuItem.style.cssText = `
@@ -171,20 +178,23 @@ export class ContextMenu {
       cursor: ${item.disabled ? 'not-allowed' : 'pointer'};
       color: ${item.disabled ? '#999' : '#333'};
       transition: background 0.15s;
+      position: relative;
     `;
 
-    // 图标
-    if (item.icon) {
-      const icon = document.createElement('span');
-      icon.className = 'menu-item-icon';
-      icon.textContent = item.icon;
-      icon.style.cssText = `
-        width: 20px;
-        margin-right: 8px;
-        text-align: center;
-      `;
-      menuItem.appendChild(icon);
-    }
+    // 图标占位（保持对齐）
+    const iconSlot = document.createElement('span');
+    iconSlot.className = 'menu-item-icon';
+    iconSlot.innerHTML = item.icon || '';
+    iconSlot.style.cssText = `
+      width: 20px;
+      height: 16px;
+      margin-right: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #666;
+    `;
+    menuItem.appendChild(iconSlot);
 
     // 文本
     const label = document.createElement('span');
@@ -209,38 +219,145 @@ export class ContextMenu {
     }
 
     // 子菜单箭头
-    if (item.children && item.children.length > 0) {
+    const hasChildren = item.children && item.children.length > 0;
+    if (hasChildren) {
       const arrow = document.createElement('span');
-      arrow.textContent = '▶';
+      arrow.textContent = '▸';
       arrow.style.cssText = `
-        font-size: 10px;
+        font-size: 12px;
         color: #666;
         margin-left: 8px;
       `;
       menuItem.appendChild(arrow);
     }
 
+    let subMenu: HTMLElement | null = null;
+    let hideTimeout: ReturnType<typeof setTimeout> | null = null;
+
     // 事件处理
     if (!item.disabled) {
       menuItem.addEventListener('mouseenter', () => {
-        menuItem.style.background = '#f5f5f5';
+        menuItem.style.background = '#e8f0fe';
+
+        // 显示子菜单
+        if (hasChildren && item.children) {
+          if (hideTimeout) {
+            clearTimeout(hideTimeout);
+            hideTimeout = null;
+          }
+
+          if (!subMenu) {
+            subMenu = this.createSubMenu(item.children, menuItem);
+            document.body.appendChild(subMenu);
+          }
+          subMenu.style.display = 'block';
+        }
       });
+
       menuItem.addEventListener('mouseleave', () => {
         menuItem.style.background = '';
-      });
-      menuItem.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (item.onClick) {
-          item.onClick();
+
+        // 延迟隐藏子菜单
+        if (subMenu) {
+          hideTimeout = setTimeout(() => {
+            if (subMenu) {
+              subMenu.style.display = 'none';
+            }
+          }, 100);
         }
-        if (this.onItemClick) {
-          this.onItemClick(item);
-        }
-        this.hide();
       });
+
+      // 如果没有子菜单，点击执行操作
+      if (!hasChildren) {
+        menuItem.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (item.onClick) {
+            item.onClick();
+          }
+          if (this.onItemClick) {
+            this.onItemClick(item);
+          }
+          this.hide();
+        });
+      }
     }
 
     return menuItem;
+  }
+
+  /**
+   * 创建子菜单
+   */
+  private createSubMenu(items: MenuItem[], parentItem: HTMLElement): HTMLElement {
+    const subMenu = document.createElement('div');
+    subMenu.className = 'spreadsheet-context-submenu';
+    subMenu.style.cssText = `
+      position: fixed;
+      min-width: ${this.options.width}px;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      padding: 4px 0;
+      z-index: ${(this.options.zIndex ?? 1000) + 1};
+      font-size: 13px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    `;
+
+    // 定位子菜单
+    const rect = parentItem.getBoundingClientRect();
+    let left = rect.right - 4;
+    let top = rect.top;
+
+    // 检查是否超出视口
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+
+    // 先添加到 DOM 获取尺寸
+    subMenu.style.visibility = 'hidden';
+    document.body.appendChild(subMenu);
+    const subMenuRect = subMenu.getBoundingClientRect();
+    subMenu.remove();
+    subMenu.style.visibility = '';
+
+    if (left + subMenuRect.width > viewportWidth) {
+      left = rect.left - subMenuRect.width + 4;
+    }
+    if (top + subMenuRect.height > viewportHeight) {
+      top = viewportHeight - subMenuRect.height - 10;
+    }
+
+    subMenu.style.left = `${Math.max(0, left)}px`;
+    subMenu.style.top = `${Math.max(0, top)}px`;
+
+    // 添加菜单项
+    for (const item of items) {
+      if (item.hidden) continue;
+
+      const menuItem = this.createMenuItem(item, subMenu);
+      subMenu.appendChild(menuItem);
+
+      if (item.divider) {
+        const divider = document.createElement('div');
+        divider.style.cssText = `
+          height: 1px;
+          background: #e0e0e0;
+          margin: 4px 0;
+        `;
+        subMenu.appendChild(divider);
+      }
+    }
+
+    // 鼠标进入子菜单时保持显示
+    subMenu.addEventListener('mouseenter', () => {
+      subMenu.style.display = 'block';
+    });
+
+    subMenu.addEventListener('mouseleave', () => {
+      subMenu.style.display = 'none';
+    });
+
+    return subMenu;
   }
 
   /**
@@ -256,99 +373,214 @@ export class ContextMenu {
 }
 
 /**
- * 创建默认的电子表格右键菜单项
+ * 创建默认的电子表格右键菜单项（腾讯文档风格）
  */
 export function createDefaultContextMenuItems(): MenuItem[] {
   return [
+    // 剪贴板操作
     {
       id: 'cut',
       label: '剪切',
-      icon: '✂️',
+      icon: createIcon('scissors'),
       shortcut: 'Ctrl+X'
     },
     {
       id: 'copy',
       label: '复制',
-      icon: '📋',
+      icon: createIcon('copy'),
       shortcut: 'Ctrl+C'
     },
     {
       id: 'paste',
       label: '粘贴',
-      icon: '📄',
-      shortcut: 'Ctrl+V',
-      divider: true
+      icon: createIcon('clipboard'),
+      shortcut: 'Ctrl+V'
     },
     {
       id: 'pasteSpecial',
       label: '选择性粘贴',
+      icon: createIcon('clipboard-list'),
       shortcut: 'Ctrl+Shift+V',
       children: [
         { id: 'pasteValues', label: '仅粘贴值' },
         { id: 'pasteFormulas', label: '仅粘贴公式' },
-        { id: 'pasteFormats', label: '仅粘贴格式' }
+        { id: 'pasteFormats', label: '仅粘贴格式' },
+        { id: 'pasteColumnWidth', label: '粘贴列宽' },
+        { id: 'pasteTranspose', label: '转置粘贴' }
       ],
       divider: true
     },
+
+    // 插入操作
     {
-      id: 'insertRowAbove',
-      label: '在上方插入行',
-      icon: '➕'
+      id: 'insert',
+      label: '插入',
+      icon: createIcon('plus'),
+      children: [
+        { id: 'insertRowAbove', label: '在上方插入 1 行' },
+        { id: 'insertRowBelow', label: '在下方插入 1 行' },
+        { id: 'insertRowsAbove', label: '在上方插入多行...' },
+        { id: 'insertRowsBelow', label: '在下方插入多行...' },
+        { id: 'insertColLeft', label: '在左侧插入 1 列' },
+        { id: 'insertColRight', label: '在右侧插入 1 列' },
+        { id: 'insertColsLeft', label: '在左侧插入多列...' },
+        { id: 'insertColsRight', label: '在右侧插入多列...' },
+        { id: 'divider1', label: '', divider: true },
+        { id: 'insertCells', label: '插入单元格...' }
+      ]
     },
     {
-      id: 'insertRowBelow',
-      label: '在下方插入行',
-      icon: '➕'
-    },
-    {
-      id: 'insertColLeft',
-      label: '在左侧插入列',
-      icon: '➕'
-    },
-    {
-      id: 'insertColRight',
-      label: '在右侧插入列',
-      icon: '➕',
+      id: 'delete',
+      label: '删除',
+      icon: createIcon('trash'),
+      children: [
+        { id: 'deleteRow', label: '删除行' },
+        { id: 'deleteCol', label: '删除列' },
+        { id: 'deleteCells', label: '删除单元格...' }
+      ],
       divider: true
     },
+
+    // 清除操作
     {
-      id: 'deleteRow',
-      label: '删除行',
-      icon: '🗑️'
-    },
-    {
-      id: 'deleteCol',
-      label: '删除列',
-      icon: '🗑️',
+      id: 'clear',
+      label: '清除',
+      icon: createIcon('eraser'),
+      children: [
+        { id: 'clearContents', label: '清除内容', shortcut: 'Delete' },
+        { id: 'clearFormats', label: '清除格式' },
+        { id: 'clearComments', label: '清除批注' },
+        { id: 'clearHyperlinks', label: '清除超链接' },
+        { id: 'clearAll', label: '全部清除' }
+      ],
       divider: true
     },
-    {
-      id: 'clearContents',
-      label: '清除内容',
-      shortcut: 'Delete'
-    },
-    {
-      id: 'clearFormats',
-      label: '清除格式'
-    },
-    {
-      id: 'clearAll',
-      label: '清除全部',
-      divider: true
-    },
+
+    // 格式操作
     {
       id: 'formatCells',
       label: '设置单元格格式',
-      icon: '⚙️',
+      icon: createIcon('settings'),
       shortcut: 'Ctrl+1'
     },
     {
-      id: 'mergeCells',
-      label: '合并单元格'
+      id: 'rowHeight',
+      label: '行高...',
+      icon: createIcon('move-vertical')
     },
     {
-      id: 'unmergeCells',
-      label: '取消合并'
+      id: 'colWidth',
+      label: '列宽...',
+      icon: createIcon('move-horizontal')
+    },
+    {
+      id: 'hideRow',
+      label: '隐藏行',
+      icon: createIcon('eye-off')
+    },
+    {
+      id: 'hideCol',
+      label: '隐藏列',
+      icon: createIcon('eye-off')
+    },
+    {
+      id: 'showHiddenRows',
+      label: '显示隐藏的行',
+      icon: createIcon('eye')
+    },
+    {
+      id: 'showHiddenCols',
+      label: '显示隐藏的列',
+      icon: createIcon('eye'),
+      divider: true
+    },
+
+    // 合并单元格
+    {
+      id: 'merge',
+      label: '合并单元格',
+      icon: createIcon('merge'),
+      children: [
+        { id: 'mergeAll', label: '合并所有单元格' },
+        { id: 'mergeHorizontal', label: '横向合并' },
+        { id: 'mergeVertical', label: '纵向合并' },
+        { id: 'unmergeCells', label: '取消合并' }
+      ],
+      divider: true
+    },
+
+    // 排序和筛选
+    {
+      id: 'sort',
+      label: '排序',
+      icon: createIcon('sort-asc'),
+      children: [
+        { id: 'sortAsc', label: '升序排列 A→Z', icon: createIcon('sort-asc') },
+        { id: 'sortDesc', label: '降序排列 Z→A', icon: createIcon('sort-desc') },
+        { id: 'customSort', label: '自定义排序...' }
+      ]
+    },
+    {
+      id: 'filter',
+      label: '筛选',
+      icon: createIcon('filter'),
+      children: [
+        { id: 'addFilter', label: '添加筛选' },
+        { id: 'clearFilter', label: '清除筛选' },
+        { id: 'reapplyFilter', label: '重新应用筛选' }
+      ],
+      divider: true
+    },
+
+    // 数据操作
+    {
+      id: 'insertComment',
+      label: '插入批注',
+      icon: createIcon('message-square')
+    },
+    {
+      id: 'insertLink',
+      label: '插入链接',
+      icon: createIcon('link'),
+      shortcut: 'Ctrl+K'
+    },
+    {
+      id: 'insertImage',
+      label: '插入图片',
+      icon: createIcon('image')
+    },
+    {
+      id: 'insertChart',
+      label: '插入图表',
+      icon: createIcon('bar-chart'),
+      divider: true
+    },
+
+    // 数据验证
+    {
+      id: 'dataValidation',
+      label: '数据验证',
+      icon: createIcon('check-square'),
+      children: [
+        { id: 'addValidation', label: '设置数据验证...' },
+        { id: 'clearValidation', label: '清除数据验证' },
+        { id: 'circleInvalid', label: '圈释无效数据' }
+      ]
+    },
+    {
+      id: 'conditionalFormat',
+      label: '条件格式',
+      icon: createIcon('palette'),
+      children: [
+        { id: 'highlightCells', label: '突出显示单元格规则' },
+        { id: 'topBottom', label: '项目选取规则' },
+        { id: 'dataBars', label: '数据条' },
+        { id: 'colorScales', label: '色阶' },
+        { id: 'iconSets', label: '图标集' },
+        { id: 'newRule', label: '新建规则...' },
+        { id: 'clearRules', label: '清除规则' },
+        { id: 'manageRules', label: '管理规则...' }
+      ]
     }
   ];
 }

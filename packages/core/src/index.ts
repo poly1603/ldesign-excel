@@ -187,5 +187,5 @@ export { Spreadsheet } from './core';
 export * from './core/types';
 export * from './core/commands';
 export { SelectionManager } from './core/selection/SelectionManager';
-export { ContextMenu, createDefaultContextMenuItems } from './core/ui/ContextMenu';
+export * from './core/ui';
 export { ClipboardManager } from './core/clipboard/ClipboardManager';

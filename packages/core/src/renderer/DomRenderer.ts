@@ -53,6 +53,11 @@ export class DomRenderer {
   private selectionOverlay: HTMLElement | null = null;
   private isDragging = false;
 
+  // 填充柄
+  private fillHandle: HTMLElement | null = null;
+  private isFillDragging = false;
+  private fillStartCell: { row: number; col: number } | null = null;
+
   // 右键菜单
   private contextMenu: ContextMenu | null = null;
 
@@ -97,6 +102,22 @@ export class DomRenderer {
       z-index: 10;
     `;
 
+    // 创建填充柄
+    this.fillHandle = document.createElement('div');
+    this.fillHandle.className = 'fill-handle';
+    this.fillHandle.style.cssText = `
+      position: fixed;
+      width: 8px;
+      height: 8px;
+      background: #1a73e8;
+      border: 1px solid #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      cursor: crosshair;
+      z-index: 9999;
+      display: none;
+    `;
+    document.body.appendChild(this.fillHandle);
+
     // 初始化右键菜单
     this.contextMenu = new ContextMenu(this.container, {
       items: createDefaultContextMenuItems()
@@ -112,7 +133,23 @@ export class DomRenderer {
     // 鼠标按下开始拖拽选择
     this.tableContainer.addEventListener('mousedown', (e) => {
       const target = e.target as HTMLElement;
+
+      // 检查是否点击了列头
+      const th = target.closest('th');
+      if (th && th.dataset.col !== undefined) {
+        const col = parseInt(th.dataset.col, 10);
+        this.selectionManager.selectCol(col, e.ctrlKey || e.metaKey);
+        return;
+      }
+
+      // 检查是否点击了行头
       const td = target.closest('td');
+      if (td && td.dataset.rowHeader !== undefined) {
+        const row = parseInt(td.dataset.row ?? '0', 10);
+        this.selectionManager.selectRow(row, e.ctrlKey || e.metaKey);
+        return;
+      }
+
       if (!td || td.dataset.row === undefined) return;
 
       const row = parseInt(td.dataset.row, 10);
@@ -131,6 +168,18 @@ export class DomRenderer {
 
     // 鼠标移动更新拖拽选择
     this.tableContainer.addEventListener('mousemove', (e) => {
+      if (this.isFillDragging) {
+        // 填充柄拖拽
+        const target = e.target as HTMLElement;
+        const td = target.closest('td');
+        if (td && td.dataset.row !== undefined) {
+          const row = parseInt(td.dataset.row, 10);
+          const col = parseInt(td.dataset.col ?? '0', 10);
+          this.updateFillPreview(row, col);
+        }
+        return;
+      }
+
       if (!this.isDragging) return;
 
       const target = e.target as HTMLElement;
@@ -148,7 +197,23 @@ export class DomRenderer {
         this.selectionManager.endDragSelection();
         this.isDragging = false;
       }
+      if (this.isFillDragging) {
+        this.completeFill();
+        this.isFillDragging = false;
+        this.fillStartCell = null;
+      }
     });
+
+    // 填充柄事件
+    if (this.fillHandle) {
+      this.fillHandle.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const activeCell = this.selectionManager.getActiveCell();
+        this.fillStartCell = { row: activeCell.row, col: activeCell.col };
+        this.isFillDragging = true;
+      });
+    }
 
     // 右键菜单
     this.tableContainer.addEventListener('contextmenu', (e) => {
@@ -213,11 +278,86 @@ export class DomRenderer {
       this.onContextMenuAction(action, selection);
     }
 
+    const bounds = this.selectionManager.getSelectionBounds();
+
     switch (action) {
+      // 剪贴板操作
+      case 'cut':
+        this.copySelectedCells(true);
+        break;
+      case 'copy':
+        this.copySelectedCells(false);
+        break;
+      case 'paste':
+        this.pasteCells();
+        break;
+
+      // 清除操作
       case 'clearContents':
         this.clearSelectedCells();
         break;
-      // 其他操作通过回调处理
+      case 'clearFormats':
+        this.clearSelectedFormats();
+        break;
+      case 'clearAll':
+        this.clearSelectedCells();
+        this.clearSelectedFormats();
+        break;
+
+      // 插入行/列
+      case 'insertRowAbove':
+        if (bounds) this.insertRows(bounds.start.row, 1, 'above');
+        break;
+      case 'insertRowBelow':
+        if (bounds) this.insertRows(bounds.end.row, 1, 'below');
+        break;
+      case 'insertColLeft':
+        if (bounds) this.insertCols(bounds.start.col, 1, 'left');
+        break;
+      case 'insertColRight':
+        if (bounds) this.insertCols(bounds.end.col, 1, 'right');
+        break;
+
+      // 删除行/列
+      case 'deleteRow':
+        if (bounds) this.deleteRows(bounds.start.row, bounds.end.row - bounds.start.row + 1);
+        break;
+      case 'deleteCol':
+        if (bounds) this.deleteCols(bounds.start.col, bounds.end.col - bounds.start.col + 1);
+        break;
+
+      // 隐藏/显示行列
+      case 'hideRow':
+        if (bounds) this.hideRows(bounds.start.row, bounds.end.row);
+        break;
+      case 'hideCol':
+        if (bounds) this.hideCols(bounds.start.col, bounds.end.col);
+        break;
+      case 'showHiddenRows':
+        this.showAllRows();
+        break;
+      case 'showHiddenCols':
+        this.showAllCols();
+        break;
+
+      // 排序
+      case 'sortAsc':
+        if (bounds) this.sortRange(bounds, 'asc');
+        break;
+      case 'sortDesc':
+        if (bounds) this.sortRange(bounds, 'desc');
+        break;
+
+      // 合并单元格
+      case 'mergeAll':
+        if (bounds) this.mergeCells(bounds);
+        break;
+      case 'unmergeCells':
+        if (bounds) this.unmergeCells(bounds);
+        break;
+
+      default:
+        console.log('Context menu action:', action);
     }
   }
 
@@ -282,6 +422,9 @@ export class DomRenderer {
       // 活动单元格不需要选区高亮
       activeTd.style.boxShadow = '';
     }
+
+    // 更新填充柄位置
+    this.updateFillHandlePosition();
   }
 
   setSheet(sheet: Sheet): void {
@@ -385,6 +528,7 @@ export class DomRenderer {
       for (let col = 0; col <= maxCol; col++) {
         const th = document.createElement('th');
         th.textContent = this.getColumnLabel(col);
+        th.dataset.col = String(col);
         th.style.cssText = `
           height: 24px;
           background: #f3f3f3;
@@ -392,6 +536,8 @@ export class DomRenderer {
           font-weight: normal;
           color: #666;
           text-align: center;
+          cursor: pointer;
+          user-select: none;
         `;
         headerRow.appendChild(th);
       }
@@ -416,6 +562,8 @@ export class DomRenderer {
       if (this.options.showRowHeaders) {
         const rowHeader = document.createElement('td');
         rowHeader.textContent = String(row + 1);
+        rowHeader.dataset.row = String(row);
+        rowHeader.dataset.rowHeader = 'true';
         rowHeader.style.cssText = `
           min-width: 50px;
           background: #f3f3f3;
@@ -425,6 +573,8 @@ export class DomRenderer {
           position: sticky;
           left: 0;
           z-index: 5;
+          cursor: pointer;
+          user-select: none;
         `;
         tr.appendChild(rowHeader);
       }
@@ -502,11 +652,6 @@ export class DomRenderer {
 
     // 背景色
     if (style?.fill) {
-      // 调试：打印第一行单元格的填充信息
-      if (cell && cell.row === 0) {
-        console.log(`Cell ${cell.address} fill:`, JSON.stringify(style.fill));
-      }
-
       if (style.fill.pattern !== 'none') {
         const bgColor = this.resolveFillColor(style.fill);
         if (bgColor) {
@@ -880,5 +1025,624 @@ export class DomRenderer {
 
   getTotalHeight(): number {
     return this.table?.offsetHeight ?? 0;
+  }
+
+  // 填充预览
+  private updateFillPreview(_row: number, _col: number): void {
+    // 暂时只更新选区预览，完整填充功能后续实现
+    // 这里可以显示填充范围的虚线框
+  }
+
+  // 完成填充
+  private completeFill(): void {
+    if (!this.fillStartCell || !this.sheet) return;
+
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    // 获取源单元格的值
+    const sourceAddress = this.formatAddress(this.fillStartCell.row, this.fillStartCell.col);
+    const sourceCell = this.sheet.cells.get(sourceAddress);
+    const sourceValue = sourceCell?.text ?? '';
+
+    // 填充到选区
+    for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
+      for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
+        if (row === this.fillStartCell.row && col === this.fillStartCell.col) continue;
+        this.setCellValue(row, col, sourceValue);
+      }
+    }
+  }
+
+  // 更新填充柄位置
+  private updateFillHandlePosition(): void {
+    if (!this.fillHandle || !this.tableContainer) return;
+
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) {
+      this.fillHandle.style.display = 'none';
+      return;
+    }
+
+    // 获取选区右下角单元格
+    const endAddress = this.formatAddress(bounds.end.row, bounds.end.col);
+    const endTd = this.cellElements.get(endAddress);
+
+    if (!endTd) {
+      this.fillHandle.style.display = 'none';
+      return;
+    }
+
+    const tdRect = endTd.getBoundingClientRect();
+    const tableContainerRect = this.tableContainer.getBoundingClientRect();
+
+    // 检查单元格是否在可视区域内
+    if (tdRect.right < tableContainerRect.left ||
+      tdRect.bottom < tableContainerRect.top ||
+      tdRect.left > tableContainerRect.right ||
+      tdRect.top > tableContainerRect.bottom) {
+      this.fillHandle.style.display = 'none';
+      return;
+    }
+
+    // 使用 fixed 定位，相对于视口
+    this.fillHandle.style.position = 'fixed';
+    this.fillHandle.style.display = 'block';
+    this.fillHandle.style.left = `${tdRect.right - 4}px`;
+    this.fillHandle.style.top = `${tdRect.bottom - 4}px`;
+  }
+
+  // 剪贴板数据
+  private clipboardData: { cells: Map<string, { text: string; style?: CSSStyleDeclaration }>, bounds: { startRow: number; startCol: number; endRow: number; endCol: number } } | null = null;
+  private isCut = false;
+
+  // 复制选中的单元格
+  private copySelectedCells(cut: boolean): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds || !this.sheet) return;
+
+    this.isCut = cut;
+    this.clipboardData = {
+      cells: new Map(),
+      bounds: {
+        startRow: bounds.start.row,
+        startCol: bounds.start.col,
+        endRow: bounds.end.row,
+        endCol: bounds.end.col
+      }
+    };
+
+    for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
+      for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
+        const address = this.formatAddress(row, col);
+        const cell = this.sheet.cells.get(address);
+        const td = this.cellElements.get(address);
+        this.clipboardData.cells.set(`${row - bounds.start.row},${col - bounds.start.col}`, {
+          text: cell?.text ?? '',
+          style: td?.style
+        });
+      }
+    }
+
+    // 尝试复制到系统剪贴板
+    const textData = this.getSelectionAsText(bounds);
+    navigator.clipboard?.writeText(textData).catch(() => { });
+
+    if (cut) {
+      // 标记剪切区域（虚线边框）
+      this.highlightCutArea(bounds);
+    }
+  }
+
+  // 获取选区文本
+  private getSelectionAsText(bounds: { start: { row: number; col: number }; end: { row: number; col: number } }): string {
+    if (!this.sheet) return '';
+    const rows: string[] = [];
+    for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
+      const cols: string[] = [];
+      for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
+        const address = this.formatAddress(row, col);
+        const cell = this.sheet.cells.get(address);
+        cols.push(cell?.text ?? '');
+      }
+      rows.push(cols.join('\t'));
+    }
+    return rows.join('\n');
+  }
+
+  // 高亮剪切区域
+  private highlightCutArea(bounds: { start: { row: number; col: number }; end: { row: number; col: number } }): void {
+    for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
+      for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
+        const td = this.cellElements.get(this.formatAddress(row, col));
+        if (td) {
+          td.style.border = '2px dashed #1a73e8';
+        }
+      }
+    }
+  }
+
+  // 粘贴单元格
+  private pasteCells(): void {
+    if (!this.clipboardData || !this.sheet) return;
+
+    const activeCell = this.selectionManager.getActiveCell();
+    const { bounds, cells } = this.clipboardData;
+
+    for (let row = 0; row <= bounds.endRow - bounds.startRow; row++) {
+      for (let col = 0; col <= bounds.endCol - bounds.startCol; col++) {
+        const data = cells.get(`${row},${col}`);
+        if (data) {
+          this.setCellValue(activeCell.row + row, activeCell.col + col, data.text);
+        }
+      }
+    }
+
+    // 如果是剪切，清除原位置
+    if (this.isCut) {
+      for (let row = bounds.startRow; row <= bounds.endRow; row++) {
+        for (let col = bounds.startCol; col <= bounds.endCol; col++) {
+          const address = this.formatAddress(row, col);
+          this.sheet.cells.delete(address);
+          const td = this.cellElements.get(address);
+          if (td) {
+            td.textContent = '';
+            td.style.border = '';
+          }
+        }
+      }
+      this.clipboardData = null;
+      this.isCut = false;
+    }
+  }
+
+  // 清除选中单元格的格式
+  private clearSelectedFormats(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
+      for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
+        const td = this.cellElements.get(this.formatAddress(row, col));
+        if (td) {
+          td.style.fontWeight = '';
+          td.style.fontStyle = '';
+          td.style.textDecoration = '';
+          td.style.color = '';
+          td.style.backgroundColor = '';
+          td.style.textAlign = '';
+        }
+      }
+    }
+  }
+
+  // 插入行
+  private insertRows(rowIndex: number, count: number, position: 'above' | 'below'): void {
+    if (!this.sheet) return;
+    const insertAt = position === 'above' ? rowIndex : rowIndex + 1;
+
+    // 移动现有数据
+    const newCells = new Map<string, typeof this.sheet.cells extends Map<string, infer V> ? V : never>();
+    this.sheet.cells.forEach((cell, address) => {
+      const [col, row] = this.parseAddress(address);
+      if (row >= insertAt) {
+        newCells.set(this.formatAddress(row + count, col), cell);
+      } else {
+        newCells.set(address, cell);
+      }
+    });
+    this.sheet.cells = newCells;
+
+    // 重新渲染
+    this.render();
+  }
+
+  // 插入列
+  private insertCols(colIndex: number, count: number, position: 'left' | 'right'): void {
+    if (!this.sheet) return;
+    const insertAt = position === 'left' ? colIndex : colIndex + 1;
+
+    const newCells = new Map<string, typeof this.sheet.cells extends Map<string, infer V> ? V : never>();
+    this.sheet.cells.forEach((cell, address) => {
+      const [col, row] = this.parseAddress(address);
+      if (col >= insertAt) {
+        newCells.set(this.formatAddress(row, col + count), cell);
+      } else {
+        newCells.set(address, cell);
+      }
+    });
+    this.sheet.cells = newCells;
+
+    this.render();
+  }
+
+  // 删除行
+  private deleteRows(startRow: number, count: number): void {
+    if (!this.sheet) return;
+
+    const newCells = new Map<string, typeof this.sheet.cells extends Map<string, infer V> ? V : never>();
+    this.sheet.cells.forEach((cell, address) => {
+      const [col, row] = this.parseAddress(address);
+      if (row < startRow) {
+        newCells.set(address, cell);
+      } else if (row >= startRow + count) {
+        newCells.set(this.formatAddress(row - count, col), cell);
+      }
+      // 删除范围内的行不复制
+    });
+    this.sheet.cells = newCells;
+
+    this.render();
+  }
+
+  // 删除列
+  private deleteCols(startCol: number, count: number): void {
+    if (!this.sheet) return;
+
+    const newCells = new Map<string, typeof this.sheet.cells extends Map<string, infer V> ? V : never>();
+    this.sheet.cells.forEach((cell, address) => {
+      const [col, row] = this.parseAddress(address);
+      if (col < startCol) {
+        newCells.set(address, cell);
+      } else if (col >= startCol + count) {
+        newCells.set(this.formatAddress(row, col - count), cell);
+      }
+    });
+    this.sheet.cells = newCells;
+
+    this.render();
+  }
+
+  // 解析地址
+  private parseAddress(address: string): [number, number] {
+    const match = address.match(/^([A-Z]+)(\d+)$/);
+    if (!match) return [0, 0];
+    const col = match[1].split('').reduce((acc, c) => acc * 26 + c.charCodeAt(0) - 64, 0) - 1;
+    const row = parseInt(match[2], 10) - 1;
+    return [col, row];
+  }
+
+  // 隐藏的行/列记录
+  private hiddenRows = new Set<number>();
+  private hiddenCols = new Set<number>();
+
+  // 隐藏行
+  private hideRows(startRow: number, endRow: number): void {
+    for (let row = startRow; row <= endRow; row++) {
+      this.hiddenRows.add(row);
+    }
+    this.render();
+  }
+
+  // 隐藏列
+  private hideCols(startCol: number, endCol: number): void {
+    for (let col = startCol; col <= endCol; col++) {
+      this.hiddenCols.add(col);
+    }
+    this.render();
+  }
+
+  // 显示所有行
+  private showAllRows(): void {
+    this.hiddenRows.clear();
+    this.render();
+  }
+
+  // 显示所有列
+  private showAllCols(): void {
+    this.hiddenCols.clear();
+    this.render();
+  }
+
+  // 排序范围
+  private sortRange(bounds: { start: { row: number; col: number }; end: { row: number; col: number } }, order: 'asc' | 'desc'): void {
+    if (!this.sheet) return;
+
+    // 收集数据
+    const rows: Array<{ row: number; values: string[] }> = [];
+    for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
+      const values: string[] = [];
+      for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
+        const address = this.formatAddress(row, col);
+        const cell = this.sheet.cells.get(address);
+        values.push(cell?.text ?? '');
+      }
+      rows.push({ row, values });
+    }
+
+    // 按第一列排序
+    rows.sort((a, b) => {
+      const aVal = a.values[0] ?? '';
+      const bVal = b.values[0] ?? '';
+      const comparison = aVal.localeCompare(bVal, 'zh-CN', { numeric: true });
+      return order === 'asc' ? comparison : -comparison;
+    });
+
+    // 重新写入数据
+    rows.forEach((rowData, newIndex) => {
+      const newRow = bounds.start.row + newIndex;
+      rowData.values.forEach((value, colIndex) => {
+        const col = bounds.start.col + colIndex;
+        this.setCellValue(newRow, col, value);
+      });
+    });
+  }
+
+  // 合并单元格记录
+  private mergedCells = new Map<string, { startRow: number; startCol: number; endRow: number; endCol: number }>();
+
+  // 合并单元格
+  private mergeCells(bounds: { start: { row: number; col: number }; end: { row: number; col: number } }): void {
+    if (!this.sheet) return;
+
+    const mergeKey = this.formatAddress(bounds.start.row, bounds.start.col);
+    this.mergedCells.set(mergeKey, {
+      startRow: bounds.start.row,
+      startCol: bounds.start.col,
+      endRow: bounds.end.row,
+      endCol: bounds.end.col
+    });
+
+    // 获取左上角单元格的值
+    const firstAddress = this.formatAddress(bounds.start.row, bounds.start.col);
+    const firstCell = this.sheet.cells.get(firstAddress);
+    const firstTd = this.cellElements.get(firstAddress);
+
+    if (firstTd) {
+      firstTd.rowSpan = bounds.end.row - bounds.start.row + 1;
+      firstTd.colSpan = bounds.end.col - bounds.start.col + 1;
+    }
+
+    // 隐藏其他单元格
+    for (let row = bounds.start.row; row <= bounds.end.row; row++) {
+      for (let col = bounds.start.col; col <= bounds.end.col; col++) {
+        if (row === bounds.start.row && col === bounds.start.col) continue;
+        const td = this.cellElements.get(this.formatAddress(row, col));
+        if (td) {
+          td.style.display = 'none';
+        }
+      }
+    }
+  }
+
+  // 取消合并单元格
+  private unmergeCells(bounds: { start: { row: number; col: number }; end: { row: number; col: number } }): void {
+    const mergeKey = this.formatAddress(bounds.start.row, bounds.start.col);
+    const merge = this.mergedCells.get(mergeKey);
+    if (!merge) return;
+
+    const firstTd = this.cellElements.get(mergeKey);
+    if (firstTd) {
+      firstTd.rowSpan = 1;
+      firstTd.colSpan = 1;
+    }
+
+    // 显示其他单元格
+    for (let row = merge.startRow; row <= merge.endRow; row++) {
+      for (let col = merge.startCol; col <= merge.endCol; col++) {
+        const td = this.cellElements.get(this.formatAddress(row, col));
+        if (td) {
+          td.style.display = '';
+        }
+      }
+    }
+
+    this.mergedCells.delete(mergeKey);
+  }
+
+  // ==================== 工具栏功能 ====================
+
+  /**
+   * 应用格式到选中单元格
+   */
+  applyFormat(property: string, value: string): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
+      for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
+        const td = this.cellElements.get(this.formatAddress(row, col));
+        if (td) {
+          // 切换样式（如果已有则移除）
+          const currentValue = td.style.getPropertyValue(property) || (td.style as unknown as Record<string, string>)[property];
+          if (currentValue === value) {
+            td.style.setProperty(property, '');
+          } else {
+            td.style.setProperty(property, value);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * 应用数字格式
+   */
+  applyNumberFormat(format: 'percent' | 'currency' | 'date'): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds || !this.sheet) return;
+
+    for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
+      for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
+        const address = this.formatAddress(row, col);
+        const cell = this.sheet.cells.get(address);
+        const td = this.cellElements.get(address);
+        if (td && cell?.text) {
+          const num = parseFloat(cell.text);
+          if (!isNaN(num)) {
+            let formatted = cell.text;
+            switch (format) {
+              case 'percent':
+                formatted = `${(num * 100).toFixed(2)}%`;
+                break;
+              case 'currency':
+                formatted = `¥${num.toFixed(2)}`;
+                break;
+              case 'date':
+                // Excel 日期序列号转换
+                if (num > 0) {
+                  const date = new Date((num - 25569) * 86400 * 1000);
+                  formatted = date.toLocaleDateString('zh-CN');
+                }
+                break;
+            }
+            td.textContent = formatted;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * 合并选中的单元格
+   */
+  mergeSelectedCells(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (bounds) {
+      this.mergeCells(bounds);
+    }
+  }
+
+  /**
+   * 插入链接
+   */
+  insertLink(url: string): void {
+    const activeCell = this.selectionManager.getActiveCell();
+    const td = this.cellElements.get(this.formatAddress(activeCell.row, activeCell.col));
+    if (td) {
+      const link = document.createElement('a');
+      link.href = url;
+      link.textContent = td.textContent || url;
+      link.target = '_blank';
+      link.style.color = '#1a73e8';
+      td.textContent = '';
+      td.appendChild(link);
+    }
+  }
+
+  /**
+   * 插入图片
+   */
+  insertImage(dataUrl: string): void {
+    const activeCell = this.selectionManager.getActiveCell();
+    const td = this.cellElements.get(this.formatAddress(activeCell.row, activeCell.col));
+    if (td) {
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.style.maxWidth = '100%';
+      img.style.maxHeight = '100px';
+      td.textContent = '';
+      td.appendChild(img);
+    }
+  }
+
+  /**
+   * 插入批注
+   */
+  insertComment(): void {
+    const comment = prompt('请输入批注内容:');
+    if (!comment) return;
+
+    const activeCell = this.selectionManager.getActiveCell();
+    const td = this.cellElements.get(this.formatAddress(activeCell.row, activeCell.col));
+    if (td) {
+      td.title = comment;
+      // 添加批注标记
+      const marker = document.createElement('div');
+      marker.style.cssText = `
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 0;
+        height: 0;
+        border-left: 6px solid transparent;
+        border-top: 6px solid #ff6b6b;
+      `;
+      td.style.position = 'relative';
+      td.appendChild(marker);
+    }
+  }
+
+  /**
+   * 切换筛选
+   */
+  toggleFilter(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    // 在第一行添加筛选下拉按钮
+    for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
+      const td = this.cellElements.get(this.formatAddress(bounds.start.row, col));
+      if (td) {
+        const existingFilter = td.querySelector('.filter-btn');
+        if (existingFilter) {
+          existingFilter.remove();
+        } else {
+          const filterBtn = document.createElement('span');
+          filterBtn.className = 'filter-btn';
+          filterBtn.innerHTML = '▼';
+          filterBtn.style.cssText = `
+            position: absolute;
+            right: 2px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 10px;
+            color: #666;
+            cursor: pointer;
+          `;
+          filterBtn.onclick = (e) => {
+            e.stopPropagation();
+            this.showFilterMenu(col, filterBtn);
+          };
+          td.style.position = 'relative';
+          td.appendChild(filterBtn);
+        }
+      }
+    }
+  }
+
+  private showFilterMenu(col: number, anchor: HTMLElement): void {
+    // 简单的筛选菜单
+    const menu = document.createElement('div');
+    menu.style.cssText = `
+      position: absolute;
+      top: 100%;
+      right: 0;
+      background: white;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      padding: 8px;
+      z-index: 1000;
+      min-width: 150px;
+    `;
+    menu.innerHTML = `
+      <div style="padding: 4px 8px; cursor: pointer; border-radius: 4px;" onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background=''">升序排列</div>
+      <div style="padding: 4px 8px; cursor: pointer; border-radius: 4px;" onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background=''">降序排列</div>
+      <div style="height: 1px; background: #e0e0e0; margin: 4px 0;"></div>
+      <div style="padding: 4px 8px; cursor: pointer; border-radius: 4px;" onmouseover="this.style.background='#f0f0f0'" onmouseout="this.style.background=''">清除筛选</div>
+    `;
+
+    anchor.parentElement?.appendChild(menu);
+
+    // 点击外部关闭
+    const closeMenu = (e: MouseEvent) => {
+      if (!menu.contains(e.target as Node)) {
+        menu.remove();
+        document.removeEventListener('click', closeMenu);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeMenu), 0);
+  }
+
+  /**
+   * 显示排序对话框
+   */
+  showSortDialog(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    const order = confirm('点击"确定"升序排列，点击"取消"降序排列') ? 'asc' : 'desc';
+    this.sortRange(bounds, order);
   }
 }

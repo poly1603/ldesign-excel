@@ -12,10 +12,13 @@ export * from './types';
 export * from './commands';
 
 // 选区管理
-export { SelectionManager, type SelectionManagerOptions } from './selection/SelectionManager';
+export { SelectionManager } from './selection/SelectionManager';
 
 // UI 组件
-export { ContextMenu, createDefaultContextMenuItems, type MenuItem, type ContextMenuOptions } from './ui/ContextMenu';
+export * from './ui';
 
 // 剪贴板
-export { ClipboardManager, type ClipboardData, type ClipboardManagerOptions } from './clipboard/ClipboardManager';
+export { ClipboardManager } from './clipboard/ClipboardManager';
+
+// 公式引擎
+export * from './formula';

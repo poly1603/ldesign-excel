@@ -181,3 +181,11 @@ export { EventEmitter, type EventListener } from './events';
 
 // 工具类导出
 export { ColorUtils, FormatUtils } from './utils';
+
+// 新版电子表格核心（v2）
+export { Spreadsheet } from './core';
+export * from './core/types';
+export * from './core/commands';
+export { SelectionManager } from './core/selection/SelectionManager';
+export { ContextMenu, createDefaultContextMenuItems } from './core/ui/ContextMenu';
+export { ClipboardManager } from './core/clipboard/ClipboardManager';

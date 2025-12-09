@@ -3,6 +3,8 @@
  * 使用 HTML 表格渲染 Excel，提供更好的文字清晰度和合并单元格支持
  */
 import type { Sheet, Cell, CellStyle } from '../types';
+import { SelectionManager } from '../core/selection/SelectionManager';
+import { ContextMenu, createDefaultContextMenuItems, MenuItem } from '../core/ui/ContextMenu';
 
 export interface DomRendererOptions {
   /** 默认列宽 */
@@ -30,7 +32,7 @@ const DEFAULT_OPTIONS: DomRendererOptions = {
   defaultRowHeight: 28,
   defaultFont: '微软雅黑',
   defaultFontSize: 14,
-  zoom: 1.2,
+  zoom: 1.5,
   showGridLines: true,
   showRowHeaders: true,
   showColHeaders: true,
@@ -43,15 +45,33 @@ export class DomRenderer {
   private sheet: Sheet | null = null;
   private tableContainer: HTMLElement | null = null;
   private table: HTMLTableElement | null = null;
-  private selection: { startRow: number; startCol: number; endRow: number; endCol: number } | null = null;
-  private activeCell: { row: number; col: number } | null = null;
+  private editingCell: { row: number; col: number; td: HTMLTableCellElement; input: HTMLInputElement } | null = null;
+  private cellElements: Map<string, HTMLTableCellElement> = new Map();
+
+  // 选区管理
+  private selectionManager: SelectionManager;
+  private selectionOverlay: HTMLElement | null = null;
+  private isDragging = false;
+
+  // 右键菜单
+  private contextMenu: ContextMenu | null = null;
 
   // 记录已渲染的合并单元格
   private renderedMerges: Set<string> = new Set();
 
+  // 回调
+  public onCellChange?: (row: number, col: number, value: string, oldValue: string) => void;
+  public onContextMenuAction?: (action: string, selection: any) => void;
+
   constructor(container: HTMLElement, options: Partial<DomRendererOptions> = {}) {
     this.container = container;
     this.options = { ...DEFAULT_OPTIONS, ...options };
+
+    // 初始化选区管理器
+    this.selectionManager = new SelectionManager({
+      onSelectionChange: () => this.updateSelectionHighlight()
+    });
+
     this.init();
   }
 
@@ -67,6 +87,201 @@ export class DomRenderer {
       background: #fff;
     `;
     this.container.appendChild(this.tableContainer);
+
+    // 创建选区覆盖层
+    this.selectionOverlay = document.createElement('div');
+    this.selectionOverlay.className = 'selection-overlay';
+    this.selectionOverlay.style.cssText = `
+      position: absolute;
+      pointer-events: none;
+      z-index: 10;
+    `;
+
+    // 初始化右键菜单
+    this.contextMenu = new ContextMenu(this.container, {
+      items: createDefaultContextMenuItems()
+    });
+
+    // 绑定事件
+    this.bindEvents();
+  }
+
+  private bindEvents(): void {
+    if (!this.tableContainer) return;
+
+    // 鼠标按下开始拖拽选择
+    this.tableContainer.addEventListener('mousedown', (e) => {
+      const target = e.target as HTMLElement;
+      const td = target.closest('td');
+      if (!td || td.dataset.row === undefined) return;
+
+      const row = parseInt(td.dataset.row, 10);
+      const col = parseInt(td.dataset.col ?? '0', 10);
+
+      const addToSelection = e.ctrlKey || e.metaKey;
+      const extendSelection = e.shiftKey;
+
+      if (extendSelection) {
+        this.selectionManager.extendSelection(row, col);
+      } else {
+        this.selectionManager.startDragSelection(row, col, addToSelection);
+        this.isDragging = true;
+      }
+    });
+
+    // 鼠标移动更新拖拽选择
+    this.tableContainer.addEventListener('mousemove', (e) => {
+      if (!this.isDragging) return;
+
+      const target = e.target as HTMLElement;
+      const td = target.closest('td');
+      if (!td || td.dataset.row === undefined) return;
+
+      const row = parseInt(td.dataset.row, 10);
+      const col = parseInt(td.dataset.col ?? '0', 10);
+      this.selectionManager.updateDragSelection(row, col);
+    });
+
+    // 鼠标松开结束拖拽
+    document.addEventListener('mouseup', () => {
+      if (this.isDragging) {
+        this.selectionManager.endDragSelection();
+        this.isDragging = false;
+      }
+    });
+
+    // 右键菜单
+    this.tableContainer.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      this.showContextMenu(e.clientX, e.clientY);
+    });
+
+    // 键盘事件
+    this.tableContainer.tabIndex = 0;
+    this.tableContainer.addEventListener('keydown', (e) => {
+      this.handleKeyDown(e);
+    });
+  }
+
+  private handleKeyDown(e: KeyboardEvent): void {
+    const ctrl = e.ctrlKey || e.metaKey;
+    const shift = e.shiftKey;
+
+    switch (e.key) {
+      case 'ArrowUp':
+      case 'ArrowDown':
+      case 'ArrowLeft':
+      case 'ArrowRight':
+        e.preventDefault();
+        const direction = e.key.replace('Arrow', '').toLowerCase() as 'up' | 'down' | 'left' | 'right';
+        this.selectionManager.moveActiveCell(direction, shift);
+        break;
+      case 'Delete':
+        e.preventDefault();
+        this.clearSelectedCells();
+        break;
+      case 'a':
+        if (ctrl) {
+          e.preventDefault();
+          this.selectionManager.selectAll();
+        }
+        break;
+      case 'Enter':
+        e.preventDefault();
+        const active = this.selectionManager.getActiveCell();
+        const td = this.cellElements.get(this.formatAddress(active.row, active.col));
+        if (td) {
+          const cell = this.sheet?.cells.get(this.formatAddress(active.row, active.col));
+          this.startEditing(active.row, active.col, td, cell);
+        }
+        break;
+    }
+  }
+
+  private showContextMenu(x: number, y: number): void {
+    if (!this.contextMenu) return;
+
+    this.contextMenu.show(x, y, (item: MenuItem) => {
+      this.handleContextMenuAction(item.id);
+    });
+  }
+
+  private handleContextMenuAction(action: string): void {
+    const selection = this.selectionManager.getSelection();
+
+    if (this.onContextMenuAction) {
+      this.onContextMenuAction(action, selection);
+    }
+
+    switch (action) {
+      case 'clearContents':
+        this.clearSelectedCells();
+        break;
+      // 其他操作通过回调处理
+    }
+  }
+
+  private clearSelectedCells(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds || !this.sheet) return;
+
+    for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
+      for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
+        const address = this.formatAddress(row, col);
+        this.sheet.cells.delete(address);
+        const td = this.cellElements.get(address);
+        if (td) {
+          td.textContent = '';
+        }
+      }
+    }
+  }
+
+  private updateSelectionHighlight(): void {
+    // 清除之前的高亮（只清除选区相关样式，保留原始背景）
+    this.cellElements.forEach((td) => {
+      td.classList.remove('selected', 'active');
+      td.style.outline = '';
+      td.style.outlineOffset = '';
+      td.style.boxShadow = '';
+      // 恢复原始背景色
+      if (td.dataset.originalBg !== undefined) {
+        td.style.backgroundColor = td.dataset.originalBg;
+      }
+    });
+
+    const selection = this.selectionManager.getSelection();
+    const activeCell = selection.activeCell;
+
+    // 高亮选中的单元格（使用半透明覆盖层而不是替换背景）
+    for (const range of selection.ranges) {
+      for (let row = range.start.row; row <= Math.min(range.end.row, 1000); row++) {
+        for (let col = range.start.col; col <= Math.min(range.end.col, 100); col++) {
+          const address = this.formatAddress(row, col);
+          const td = this.cellElements.get(address);
+          if (td) {
+            td.classList.add('selected');
+            // 只在第一次保存原始背景色
+            if (td.dataset.originalBg === undefined) {
+              td.dataset.originalBg = td.style.backgroundColor || '';
+            }
+            // 使用 box-shadow 而不是修改背景色
+            td.style.boxShadow = 'inset 0 0 0 1000px rgba(26, 115, 232, 0.15)';
+          }
+        }
+      }
+    }
+
+    // 高亮活动单元格
+    const activeAddress = this.formatAddress(activeCell.row, activeCell.col);
+    const activeTd = this.cellElements.get(activeAddress);
+    if (activeTd) {
+      activeTd.classList.add('active');
+      activeTd.style.outline = '2px solid #1a73e8';
+      activeTd.style.outlineOffset = '-1px';
+      // 活动单元格不需要选区高亮
+      activeTd.style.boxShadow = '';
+    }
   }
 
   setSheet(sheet: Sheet): void {
@@ -77,10 +292,9 @@ export class DomRenderer {
 
   setZoom(zoom: number): void {
     this.options.zoom = zoom;
-    // 使用 CSS transform 整体缩放
-    if (this.table) {
-      this.table.style.transform = `scale(${zoom})`;
-      this.table.style.transformOrigin = 'top left';
+    // 使用 CSS zoom 属性（不破坏 sticky 定位）
+    if (this.tableContainer) {
+      (this.tableContainer.style as any).zoom = zoom;
     }
   }
 
@@ -90,6 +304,11 @@ export class DomRenderer {
     // 清空容器
     this.tableContainer.innerHTML = '';
     this.renderedMerges.clear();
+    this.cellElements.clear();
+    this.editingCell = null;
+
+    // 应用 zoom
+    (this.tableContainer.style as any).zoom = this.options.zoom;
 
     // 创建表格
     this.table = document.createElement('table');
@@ -101,8 +320,6 @@ export class DomRenderer {
       font-size: ${this.options.defaultFontSize}px;
       background: #fff;
       min-width: max-content;
-      transform: scale(${this.options.zoom});
-      transform-origin: top left;
     `;
 
     // 计算维度
@@ -241,9 +458,23 @@ export class DomRenderer {
           td.textContent = displayText;
         }
 
-        // 添加点击事件
-        td.addEventListener('click', () => {
-          this.handleCellClick(row, col, cell);
+        // 存储单元格元素引用
+        const cellAddress = this.formatAddress(row, col);
+        this.cellElements.set(cellAddress, td);
+        td.dataset.row = String(row);
+        td.dataset.col = String(col);
+        td.dataset.address = cellAddress;
+
+        // 添加点击事件 - 选中
+        td.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.handleCellClick(row, col, cell, td);
+        });
+
+        // 添加双击事件 - 编辑
+        td.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          this.startEditing(row, col, td, cell);
         });
 
         tr.appendChild(td);
@@ -270,10 +501,17 @@ export class DomRenderer {
     `;
 
     // 背景色
-    if (style?.fill && style.fill.pattern !== 'none') {
-      const bgColor = this.resolveFillColor(style.fill);
-      if (bgColor) {
-        cssText += `background-color: ${bgColor};`;
+    if (style?.fill) {
+      // 调试：打印第一行单元格的填充信息
+      if (cell && cell.row === 0) {
+        console.log(`Cell ${cell.address} fill:`, JSON.stringify(style.fill));
+      }
+
+      if (style.fill.pattern !== 'none') {
+        const bgColor = this.resolveFillColor(style.fill);
+        if (bgColor) {
+          cssText += `background-color: ${bgColor};`;
+        }
       }
     }
 
@@ -329,23 +567,33 @@ export class DomRenderer {
   private resolveFillColor(fill: CellStyle['fill']): string | null {
     if (!fill) return null;
 
-    // 对于 solid 填充，使用 fgColor
-    if (fill.pattern === 'solid' && fill.fgColor) {
+    // solid 或 gray125 等模式都可能有 fgColor
+    if (fill.fgColor) {
       const color = this.resolveColor(fill.fgColor);
-      // 避免黑色背景（通常是解析错误）
-      if (color === '#000000' || color === '#000') {
-        return null;
+      // 只过滤纯黑色（通常是默认值或解析问题）
+      // 但如果明确是 solid 模式且有颜色，保留它
+      if (fill.pattern === 'solid' || fill.pattern === 'gray125') {
+        if (color !== '#000000' && color !== '#000' && color !== '#333' && color !== '#333333') {
+          return color;
+        }
       }
-      return color;
     }
 
-    // 其他模式使用 bgColor
+    // 尝试 bgColor
     if (fill.bgColor) {
       const color = this.resolveColor(fill.bgColor);
-      if (color === '#000000' || color === '#000') {
-        return null;
+      if (color !== '#000000' && color !== '#000' && color !== '#333' && color !== '#333333') {
+        return color;
       }
-      return color;
+    }
+
+    // 如果 pattern 不是 none，且有 fgColor，可能需要返回它
+    if (fill.pattern && fill.pattern !== 'none' && fill.fgColor) {
+      const color = this.resolveColor(fill.fgColor);
+      // 返回非默认颜色
+      if (color && !color.startsWith('#0') && !color.startsWith('#3')) {
+        return color;
+      }
     }
 
     return null;
@@ -366,11 +614,20 @@ export class DomRenderer {
       return `#${rgb}`;
     }
     if (color.theme !== undefined) {
-      // Excel 主题色 - 更准确的默认值
+      // Excel 主题色 - Office 2013+ 默认主题
+      // 0: lt1 (背景1), 1: dk1 (文字1), 2: lt2 (背景2), 3: dk2 (文字2)
+      // 4: accent1, 5: accent2, 6: accent3, 7: accent4, 8: accent5, 9: accent6
       const themeColors = [
-        '#FFFFFF', '#000000', '#E7E6E6', '#44546A',
-        '#4472C4', '#ED7D31', '#A5A5A5', '#FFC000',
-        '#5B9BD5', '#70AD47'
+        '#FFFFFF', // 0: lt1 - 浅色背景
+        '#000000', // 1: dk1 - 深色文字
+        '#E7E6E6', // 2: lt2 - 浅色背景2
+        '#44546A', // 3: dk2 - 深色文字2
+        '#4472C4', // 4: accent1 - 蓝色
+        '#ED7D31', // 5: accent2 - 橙色
+        '#A5A5A5', // 6: accent3 - 灰色
+        '#FFC000', // 7: accent4 - 黄色
+        '#5B9BD5', // 8: accent5 - 浅蓝色
+        '#70AD47'  // 9: accent6 - 绿色
       ];
       let baseColor = themeColors[color.theme] ?? '#333333';
 
@@ -439,25 +696,114 @@ export class DomRenderer {
     return label;
   }
 
-  private handleCellClick(row: number, col: number, cell: Cell | undefined): void {
-    this.activeCell = { row, col };
-    this.selection = { startRow: row, startCol: col, endRow: row, endCol: col };
-
-    // 触发事件（如果需要）
+  private handleCellClick(row: number, col: number, cell: Cell | undefined, _td: HTMLTableCellElement): void {
+    // 使用选区管理器处理选中
+    // 注意：实际选区由 mousedown 事件处理，这里只触发事件
     const event = new CustomEvent('cellClick', {
-      detail: { row, col, cell }
+      detail: { row, col, cell, address: this.formatAddress(row, col) }
     });
     this.container.dispatchEvent(event);
   }
 
-  setSelection(startRow: number, startCol: number, endRow: number, endCol: number): void {
-    this.selection = {
-      startRow: Math.min(startRow, endRow),
-      startCol: Math.min(startCol, endCol),
-      endRow: Math.max(startRow, endRow),
-      endCol: Math.max(startCol, endCol)
+  private startEditing(row: number, col: number, td: HTMLTableCellElement, cell: Cell | undefined): void {
+    // 如果已在编辑，先结束
+    if (this.editingCell) {
+      this.finishEditing();
+    }
+
+    const oldValue = cell?.text ?? td.textContent ?? '';
+
+    // 创建输入框
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = oldValue;
+    input.style.cssText = `
+      width: 100%;
+      height: 100%;
+      border: none;
+      outline: none;
+      padding: 2px 4px;
+      font: inherit;
+      background: #fff;
+      box-sizing: border-box;
+    `;
+
+    // 保存原始内容
+    const originalContent = td.textContent;
+    td.textContent = '';
+    td.appendChild(input);
+    input.focus();
+    input.select();
+
+    this.editingCell = { row, col, td, input };
+
+    // 处理输入完成
+    const finishEdit = () => {
+      if (!this.editingCell) return;
+
+      const newValue = input.value;
+      td.textContent = newValue;
+
+      // 更新 sheet 数据
+      if (this.sheet) {
+        const address = this.formatAddress(row, col);
+        let cellData = this.sheet.cells.get(address);
+        if (!cellData) {
+          cellData = {
+            address,
+            row,
+            col,
+            value: newValue,
+            type: 'string',
+            text: newValue
+          };
+          this.sheet.cells.set(address, cellData);
+        } else {
+          cellData.value = newValue;
+          cellData.text = newValue;
+          cellData.formattedValue = newValue;
+        }
+      }
+
+      // 触发回调
+      if (this.onCellChange && newValue !== originalContent) {
+        this.onCellChange(row, col, newValue, originalContent ?? '');
+      }
+
+      // 触发事件
+      const event = new CustomEvent('cellChange', {
+        detail: { row, col, value: newValue, oldValue: originalContent }
+      });
+      this.container.dispatchEvent(event);
+
+      this.editingCell = null;
     };
-    // TODO: 高亮选中区域
+
+    // 回车或失焦完成编辑
+    input.addEventListener('blur', finishEdit);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        input.blur();
+      } else if (e.key === 'Escape') {
+        // 取消编辑
+        td.textContent = originalContent;
+        this.editingCell = null;
+      }
+    });
+  }
+
+  private finishEditing(): void {
+    if (this.editingCell) {
+      this.editingCell.input.blur();
+    }
+  }
+
+  setSelection(startRow: number, startCol: number, endRow: number, endCol: number): void {
+    this.selectionManager.selectRange({
+      start: { row: startRow, col: startCol },
+      end: { row: endRow, col: endCol }
+    });
   }
 
   destroy(): void {
@@ -465,8 +811,66 @@ export class DomRenderer {
       this.tableContainer.remove();
       this.tableContainer = null;
     }
+    if (this.contextMenu) {
+      this.contextMenu.destroy();
+      this.contextMenu = null;
+    }
     this.table = null;
     this.sheet = null;
+    this.cellElements.clear();
+  }
+
+  // 获取当前选中的单元格
+  getActiveCell(): { row: number; col: number } {
+    return this.selectionManager.getActiveCell();
+  }
+
+  // 获取当前选区
+  getSelection() {
+    return this.selectionManager.getSelection();
+  }
+
+  // 获取选区管理器
+  getSelectionManager(): SelectionManager {
+    return this.selectionManager;
+  }
+
+  // 获取单元格值
+  getCellValue(row: number, col: number): string {
+    if (!this.sheet) return '';
+    const address = this.formatAddress(row, col);
+    const cell = this.sheet.cells.get(address);
+    return cell?.text ?? '';
+  }
+
+  // 设置单元格值
+  setCellValue(row: number, col: number, value: string): void {
+    if (!this.sheet) return;
+
+    const address = this.formatAddress(row, col);
+    let cell = this.sheet.cells.get(address);
+
+    if (!cell) {
+      cell = {
+        address,
+        row,
+        col,
+        value,
+        type: 'string',
+        text: value
+      };
+      this.sheet.cells.set(address, cell);
+    } else {
+      cell.value = value;
+      cell.text = value;
+      cell.formattedValue = value;
+    }
+
+    // 更新 DOM
+    const td = this.cellElements.get(address);
+    if (td) {
+      td.textContent = value;
+    }
   }
 
   // 获取总尺寸

@@ -86,7 +86,7 @@ const fileName = ref('');
 const isLoading = ref(false);
 const isLoaded = ref(false);
 const isDragOver = ref(false);
-const zoom = ref(1.2);
+const zoom = ref(1.5);
 const sheetCount = ref(0);
 
 // 打开文件对话框

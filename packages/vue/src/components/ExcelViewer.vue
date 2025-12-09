@@ -84,7 +84,7 @@ export default defineComponent({
      */
     readonly: {
       type: Boolean,
-      default: true
+      default: false
     },
 
     /**
@@ -100,7 +100,7 @@ export default defineComponent({
      */
     zoom: {
       type: Number,
-      default: 1
+      default: 1.5
     },
 
     /**

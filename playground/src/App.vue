@@ -1,154 +1,101 @@
 <template>
-  <div class="app">
-    <!-- 顶部工具栏 -->
-    <header class="toolbar">
-      <div class="toolbar-left">
-        <div class="logo">
-          <span class="logo-icon">📊</span>
-          <span class="logo-text">Excel 预览器</span>
+  <div class="app-layout">
+    <!-- 左侧菜单 -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <FileSpreadsheet class="logo-icon" :size="28" />
+        <div class="logo-text">
+          <span class="logo-title">Excel Viewer</span>
+          <span class="logo-subtitle">Playground</span>
         </div>
-        <div class="file-name" v-if="fileName">{{ fileName }}</div>
       </div>
-      <div class="toolbar-center">
-        <button class="tool-btn" @click="openFile">
-          <span>📁</span>
-          <span>打开文件</span>
-        </button>
-        <template v-if="isLoaded">
-          <button class="tool-btn" @click="zoomOut">➖</button>
-          <span class="zoom-label">{{ Math.round(zoom * 100) }}%</span>
-          <button class="tool-btn" @click="zoomIn">➕</button>
-        </template>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section">
+          <div class="nav-section-title">功能演示</div>
+          <router-link
+            v-for="route in menuRoutes"
+            :key="route.path"
+            :to="route.path"
+            class="nav-item"
+            :class="{ active: currentRoute === route.name }"
+          >
+            <component :is="getIcon(route.meta?.icon)" :size="18" />
+            <span>{{ route.meta?.title }}</span>
+          </router-link>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <a href="https://github.com" target="_blank" class="footer-link">
+          <Github :size="16" />
+          <span>GitHub</span>
+        </a>
+        <a href="#" class="footer-link">
+          <BookOpen :size="16" />
+          <span>文档</span>
+        </a>
       </div>
-      <div class="toolbar-right">
-        <span class="sheet-info" v-if="sheetCount > 0">
-          {{ sheetCount }} 个工作表
-        </span>
-      </div>
-    </header>
+    </aside>
 
     <!-- 主内容区 -->
     <main class="main-content">
-      <!-- 空状态 - 拖放区域 -->
-      <div 
-        v-if="!currentFile" 
-        class="empty-state" 
-        :class="{ 'drag-over': isDragOver }"
-        @drop.prevent="handleDrop" 
-        @dragover.prevent="isDragOver = true" 
-        @dragleave="isDragOver = false"
-      >
-        <div class="empty-icon">📄</div>
-        <h2>拖放 Excel 文件到这里</h2>
-        <p>支持 .xlsx 格式</p>
-        <button class="primary-btn" @click="openFile">选择文件</button>
-      </div>
-
-      <!-- Excel 查看器 -->
-      <ExcelViewer
-        v-if="currentFile"
-        ref="viewerRef"
-        :file="currentFile"
-        v-model:zoom="zoom"
-        width="100%"
-        height="100%"
-        @load="handleLoad"
-        @load-error="handleError"
-      />
-
-      <!-- 加载中 (覆盖在查看器上) -->
-      <div v-if="isLoading" class="loading-state">
-        <div class="spinner"></div>
-        <p>正在加载...</p>
-      </div>
+      <router-view />
     </main>
-
-    <input
-      ref="fileInputRef"
-      type="file"
-      accept=".xlsx,.xls"
-      class="hidden-input"
-      @change="handleFileSelect"
-    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
-import { ExcelViewer } from '@excel-viewer/vue';
-import type { LoadEvent, LoadErrorEvent } from '@excel-viewer/vue';
+import { computed } from 'vue';
+import { useRoute } from 'vue-router';
+import { routes } from './router';
+import {
+  FileSpreadsheet,
+  Settings2,
+  Menu,
+  Calculator,
+  Grid3x3,
+  MousePointer2,
+  Download,
+  Palette,
+  Github,
+  BookOpen
+} from 'lucide-vue-next';
 
-// 状态
-const fileInputRef = ref<HTMLInputElement | null>(null);
-const viewerRef = ref<InstanceType<typeof ExcelViewer> | null>(null);
-const currentFile = ref<File | null>(null);
-const fileName = ref('');
-const isLoading = ref(false);
-const isLoaded = ref(false);
-const isDragOver = ref(false);
-const zoom = ref(1.5);
-const sheetCount = ref(0);
+const route = useRoute();
+const currentRoute = computed(() => route.name);
 
-// 打开文件对话框
-const openFile = () => {
-  fileInputRef.value?.click();
+// 过滤出菜单路由
+const menuRoutes = computed(() => routes.filter(r => r.meta?.title));
+
+// 根据图标名获取组件
+const iconMap: Record<string, any> = {
+  FileSpreadsheet,
+  Settings2,
+  Menu,
+  Calculator,
+  Grid3x3,
+  MousePointer2,
+  Download,
+  Palette
 };
 
-// 处理文件选择
-const handleFileSelect = (e: Event) => {
-  const input = e.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (file) {
-    loadFile(file);
-  }
-  input.value = '';
+const getIcon = (name?: string) => {
+  return name ? iconMap[name] || FileSpreadsheet : FileSpreadsheet;
 };
-
-// 处理拖放
-const handleDrop = (e: DragEvent) => {
-  isDragOver.value = false;
-  const file = e.dataTransfer?.files[0];
-  if (file && (file.name.endsWith('.xlsx') || file.name.endsWith('.xls'))) {
-    loadFile(file);
-  }
-};
-
-// 加载文件
-const loadFile = (file: File) => {
-  console.log('loadFile called:', file.name);
-  isLoading.value = true;
-  fileName.value = file.name;
-  currentFile.value = file;
-};
-
-// 加载完成
-const handleLoad = (data: LoadEvent) => {
-  isLoading.value = false;
-  isLoaded.value = true;
-  sheetCount.value = data.workbook.sheets.length;
-  console.log('Excel 加载完成:', data.workbook);
-};
-
-// 加载失败
-const handleError = (data: LoadErrorEvent) => {
-  isLoading.value = false;
-  isLoaded.value = false;
-  currentFile.value = null;
-  alert('加载失败: ' + data.message);
-  console.error('加载失败:', data.error);
-};
-
-// 缩放
-const zoomIn = () => viewerRef.value?.zoomIn();
-const zoomOut = () => viewerRef.value?.zoomOut();
 </script>
 
 <style>
 :root {
   --primary-color: #217346;
   --primary-hover: #1a5c38;
-  --border-color: #e1e1e1;
-  --text-color: #333;
+  --sidebar-bg: #1e1e2d;
+  --sidebar-hover: #2a2a3d;
+  --sidebar-active: #3a3a4d;
+  --border-color: #e5e7eb;
+  --text-color: #1f2937;
+  --text-secondary: #6b7280;
+  --bg-color: #f9fafb;
 }
 
 * {
@@ -163,151 +110,121 @@ html, body, #app {
 }
 
 body {
-  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   color: var(--text-color);
+  background: var(--bg-color);
 }
 
-.app {
+.app-layout {
   display: flex;
-  flex-direction: column;
   height: 100%;
 }
 
-.toolbar {
+/* 侧边栏 */
+.sidebar {
+  width: 240px;
+  background: var(--sidebar-bg);
+  color: #fff;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  background: var(--primary-color);
-  color: white;
-  height: 48px;
+  flex-direction: column;
+  flex-shrink: 0;
 }
 
-.toolbar-left, .toolbar-center, .toolbar-right {
+.sidebar-header {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.logo {
+.logo-icon {
+  color: #10b981;
+}
+
+.logo-text {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+}
+
+.logo-title {
+  font-size: 16px;
   font-weight: 600;
 }
 
-.file-name {
-  font-size: 13px;
-  opacity: 0.9;
+.logo-subtitle {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
 }
 
-.tool-btn {
+.sidebar-nav {
+  flex: 1;
+  padding: 16px 0;
+  overflow-y: auto;
+}
+
+.nav-section {
+  padding: 0 12px;
+}
+
+.nav-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 8px 12px;
+  letter-spacing: 0.5px;
+}
+
+.nav-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 12px;
-  border: none;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.15);
-  color: white;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.7);
+  text-decoration: none;
+  font-size: 14px;
+  margin-bottom: 2px;
+  transition: all 0.15s;
+}
+
+.nav-item:hover {
+  background: var(--sidebar-hover);
+  color: #fff;
+}
+
+.nav-item.active {
+  background: var(--primary-color);
+  color: #fff;
+}
+
+.sidebar-footer {
+  padding: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  gap: 16px;
+}
+
+.footer-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.5);
+  text-decoration: none;
   font-size: 13px;
-  cursor: pointer;
+  transition: color 0.15s;
 }
 
-.tool-btn:hover {
-  background: rgba(255, 255, 255, 0.25);
+.footer-link:hover {
+  color: #fff;
 }
 
-.zoom-label {
-  min-width: 50px;
-  text-align: center;
-  font-size: 12px;
-}
-
-.sheet-info {
-  font-size: 12px;
-  opacity: 0.8;
-}
-
+/* 主内容区 */
 .main-content {
   flex: 1;
-  position: relative;
   overflow: hidden;
-  background: #f5f5f5;
-}
-
-.empty-state {
-  position: absolute;
-  inset: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: #fafafa;
-}
-
-.empty-state.drag-over {
-  background: #e8f5e9;
-  border: 2px dashed var(--primary-color);
-}
-
-.empty-icon {
-  font-size: 64px;
-  margin-bottom: 20px;
-  opacity: 0.6;
-}
-
-.empty-state h2 {
-  font-size: 20px;
-  color: #555;
-  margin-bottom: 8px;
-}
-
-.empty-state p {
-  color: #888;
-  margin-bottom: 24px;
-}
-
-.primary-btn {
-  padding: 10px 28px;
-  border: none;
-  border-radius: 4px;
-  background: var(--primary-color);
-  color: white;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.primary-btn:hover {
-  background: var(--primary-hover);
-}
-
-.loading-state {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.95);
-  z-index: 100;
-}
-
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 3px solid #e0e0e0;
-  border-top-color: var(--primary-color);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin-bottom: 16px;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.hidden-input {
-  display: none;
 }
 </style>

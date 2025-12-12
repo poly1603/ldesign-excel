@@ -64,6 +64,32 @@ export class DomRenderer {
   // 记录已渲染的合并单元格
   private renderedMerges: Set<string> = new Set();
 
+  // 剪贴板数据（用于选择性粘贴）
+  private clipboardData: {
+    cells: Map<string, { value: string; style: CellStyle | undefined; formula?: string }>;
+    bounds: { startRow: number; startCol: number; endRow: number; endCol: number };
+    isCut: boolean;
+  } | null = null;
+
+  // 数据验证规则
+  private dataValidations: Map<string, {
+    type: 'list' | 'number' | 'date' | 'textLength' | 'custom';
+    criteria: any;
+    allowBlank: boolean;
+    showError: boolean;
+    errorTitle?: string;
+    errorMessage?: string;
+  }> = new Map();
+
+  // 条件格式规则
+  private conditionalFormats: Array<{
+    id: string;
+    range: { startRow: number; startCol: number; endRow: number; endCol: number };
+    type: 'cellValue' | 'colorScale' | 'dataBar' | 'iconSet' | 'formula';
+    rule: any;
+    format: Partial<CellStyle>;
+  }> = [];
+
   // 回调
   public onCellChange?: (row: number, col: number, value: string, oldValue: string) => void;
   public onContextMenuAction?: (action: string, selection: any) => void;
@@ -80,7 +106,43 @@ export class DomRenderer {
     this.init();
   }
 
+  /**
+   * 注入全局样式
+   */
+  private injectStyles(): void {
+    const styleId = 'excel-dom-renderer-styles';
+    if (document.getElementById(styleId)) return;
+
+    const style = document.createElement('style');
+    style.id = styleId;
+    style.textContent = `
+      .excel-dom-renderer table {
+        border-collapse: separate;
+        border-spacing: 0;
+      }
+      .excel-dom-renderer thead {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .excel-dom-renderer thead th {
+        background: #f3f3f3 !important;
+      }
+      .excel-dom-renderer td.selected {
+        background-clip: padding-box;
+      }
+      .excel-dom-renderer td.active {
+        outline: 2px solid #1a73e8;
+        outline-offset: -2px;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
   private init(): void {
+    // 注入全局样式
+    this.injectStyles();
+
     // 创建表格容器
     this.tableContainer = document.createElement('div');
     this.tableContainer.className = 'excel-dom-renderer';
@@ -352,8 +414,96 @@ export class DomRenderer {
       case 'mergeAll':
         if (bounds) this.mergeCells(bounds);
         break;
+      case 'mergeHorizontal':
+        if (bounds) this.mergeHorizontal(bounds);
+        break;
+      case 'mergeVertical':
+        if (bounds) this.mergeVertical(bounds);
+        break;
       case 'unmergeCells':
         if (bounds) this.unmergeCells(bounds);
+        break;
+
+      // 选择性粘贴
+      case 'pasteValues':
+        this.pasteSpecial('values');
+        break;
+      case 'pasteFormulas':
+        this.pasteSpecial('formulas');
+        break;
+      case 'pasteFormats':
+        this.pasteSpecial('formats');
+        break;
+      case 'pasteColumnWidth':
+        this.pasteSpecial('columnWidth');
+        break;
+      case 'pasteTranspose':
+        this.pasteSpecial('transpose');
+        break;
+
+      // 行高列宽
+      case 'rowHeight':
+        this.showRowHeightDialog();
+        break;
+      case 'colWidth':
+        this.showColumnWidthDialog();
+        break;
+
+      // 筛选
+      case 'addFilter':
+        this.toggleFilter();
+        break;
+      case 'clearFilter':
+        this.clearAllFilters();
+        break;
+
+      // 单元格格式
+      case 'formatCells':
+        this.showFormatCellsDialog();
+        break;
+
+      // 插入操作
+      case 'insertComment':
+        this.insertComment();
+        break;
+      case 'insertLink':
+        this.showInsertLinkDialog();
+        break;
+      case 'insertImage':
+        this.showInsertImageDialog();
+        break;
+
+      // 清除
+      case 'clearComments':
+        this.clearSelectedComments();
+        break;
+      case 'clearHyperlinks':
+        this.clearSelectedHyperlinks();
+        break;
+
+      // 数据验证
+      case 'addValidation':
+        this.showDataValidationDialog();
+        break;
+      case 'clearValidation':
+        this.clearDataValidation();
+        break;
+      case 'circleInvalid':
+        this.circleInvalidData();
+        break;
+
+      // 条件格式
+      case 'conditionalFormat':
+      case 'addConditionalFormat':
+        this.showConditionalFormatDialog();
+        break;
+      case 'clearConditionalFormat':
+        this.clearConditionalFormats();
+        break;
+
+      // 自定义排序
+      case 'customSort':
+        this.showCustomSortDialog();
         break;
 
       default:
@@ -501,12 +651,10 @@ export class DomRenderer {
     // 创建表头行（列号）
     if (this.options.showColHeaders) {
       const thead = document.createElement('thead');
+      thead.style.cssText = `position: sticky; top: 0; z-index: 10;`;
       const headerRow = document.createElement('tr');
       headerRow.style.cssText = `
         background: #f3f3f3;
-        position: sticky;
-        top: 0;
-        z-index: 10;
       `;
 
       // 左上角空单元格
@@ -533,11 +681,13 @@ export class DomRenderer {
           height: 24px;
           background: #f3f3f3;
           border: 1px solid #d0d0d0;
+          border-bottom: 2px solid #d0d0d0;
           font-weight: normal;
           color: #666;
           text-align: center;
           cursor: pointer;
           user-select: none;
+          box-shadow: 0 1px 0 rgba(0,0,0,0.05);
         `;
         headerRow.appendChild(th);
       }
@@ -1092,16 +1242,11 @@ export class DomRenderer {
     this.fillHandle.style.top = `${tdRect.bottom - 4}px`;
   }
 
-  // 剪贴板数据
-  private clipboardData: { cells: Map<string, { text: string; style?: CSSStyleDeclaration }>, bounds: { startRow: number; startCol: number; endRow: number; endCol: number } } | null = null;
-  private isCut = false;
-
   // 复制选中的单元格
   private copySelectedCells(cut: boolean): void {
     const bounds = this.selectionManager.getSelectionBounds();
     if (!bounds || !this.sheet) return;
 
-    this.isCut = cut;
     this.clipboardData = {
       cells: new Map(),
       bounds: {
@@ -1109,17 +1254,18 @@ export class DomRenderer {
         startCol: bounds.start.col,
         endRow: bounds.end.row,
         endCol: bounds.end.col
-      }
+      },
+      isCut: cut
     };
 
     for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
       for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
         const address = this.formatAddress(row, col);
         const cell = this.sheet.cells.get(address);
-        const td = this.cellElements.get(address);
         this.clipboardData.cells.set(`${row - bounds.start.row},${col - bounds.start.col}`, {
-          text: cell?.text ?? '',
-          style: td?.style
+          value: cell?.text ?? '',
+          style: cell?.style,
+          formula: cell?.formula?.text
         });
       }
     }
@@ -1164,22 +1310,65 @@ export class DomRenderer {
 
   // 粘贴单元格
   private pasteCells(): void {
+    this.pasteSpecial('all');
+  }
+
+  // 选择性粘贴
+  private pasteSpecial(mode: 'all' | 'values' | 'formulas' | 'formats' | 'columnWidth' | 'transpose'): void {
     if (!this.clipboardData || !this.sheet) return;
 
     const activeCell = this.selectionManager.getActiveCell();
-    const { bounds, cells } = this.clipboardData;
+    const { bounds, cells, isCut } = this.clipboardData;
+    const rowCount = bounds.endRow - bounds.startRow + 1;
+    const colCount = bounds.endCol - bounds.startCol + 1;
 
-    for (let row = 0; row <= bounds.endRow - bounds.startRow; row++) {
-      for (let col = 0; col <= bounds.endCol - bounds.startCol; col++) {
-        const data = cells.get(`${row},${col}`);
-        if (data) {
-          this.setCellValue(activeCell.row + row, activeCell.col + col, data.text);
+    // 转置粘贴时交换行列
+    const isTranspose = mode === 'transpose';
+    const targetRows = isTranspose ? colCount : rowCount;
+    const targetCols = isTranspose ? rowCount : colCount;
+
+    for (let row = 0; row < targetRows; row++) {
+      for (let col = 0; col < targetCols; col++) {
+        const sourceKey = isTranspose ? `${col},${row}` : `${row},${col}`;
+        const data = cells.get(sourceKey);
+        if (!data) continue;
+
+        const targetRow = activeCell.row + row;
+        const targetCol = activeCell.col + col;
+
+        switch (mode) {
+          case 'values':
+            this.setCellValue(targetRow, targetCol, data.value);
+            break;
+          case 'formulas':
+            // 如果有公式则粘贴公式，否则粘贴值
+            this.setCellValue(targetRow, targetCol, data.formula || data.value);
+            break;
+          case 'formats':
+            this.applyCellStyleFromData(targetRow, targetCol, data.style);
+            break;
+          case 'columnWidth':
+            // 复制列宽
+            if (row === 0 && this.sheet.columns) {
+              const sourceCol = bounds.startCol + (isTranspose ? row : col);
+              const colDef = this.sheet.columns.get(sourceCol);
+              if (colDef) {
+                this.setColumnWidth(targetCol, colDef.pixelWidth || this.options.defaultColWidth);
+              }
+            }
+            break;
+          case 'transpose':
+          case 'all':
+          default:
+            this.setCellValue(targetRow, targetCol, data.value);
+            this.applyCellStyleFromData(targetRow, targetCol, data.style);
+            break;
         }
       }
     }
 
     // 如果是剪切，清除原位置
-    if (this.isCut) {
+    if (isCut) {
       for (let row = bounds.startRow; row <= bounds.endRow; row++) {
         for (let col = bounds.startCol; col <= bounds.endCol; col++) {
           const address = this.formatAddress(row, col);
@@ -1192,8 +1381,24 @@ export class DomRenderer {
         }
       }
       this.clipboardData = null;
-      this.isCut = false;
     }
+  }
+
+  // 应用单元格样式
+  private applyCellStyleFromData(row: number, col: number, style: CellStyle | undefined): void {
+    if (!style) return;
+    const td = this.cellElements.get(this.formatAddress(row, col));
+    if (!td) return;
+
+    if (style.font?.bold) td.style.fontWeight = 'bold';
+    if (style.font?.italic) td.style.fontStyle = 'italic';
+    if (style.font?.underline) td.style.textDecoration = 'underline';
+    if (style.font?.color) td.style.color = style.font.color;
+    if (style.font?.name) td.style.fontFamily = style.font.name;
+    if (style.font?.size) td.style.fontSize = `${style.font.size}px`;
+    if (style.fill?.fgColor) td.style.backgroundColor = style.fill.fgColor;
+    if (style.alignment?.horizontal) td.style.textAlign = style.alignment.horizontal;
+    if (style.alignment?.vertical) td.style.verticalAlign = style.alignment.vertical;
   }
 
   // 清除选中单元格的格式
@@ -1383,9 +1588,8 @@ export class DomRenderer {
       endCol: bounds.end.col
     });
 
-    // 获取左上角单元格的值
+    // 获取左上角单元格元素
     const firstAddress = this.formatAddress(bounds.start.row, bounds.start.col);
-    const firstCell = this.sheet.cells.get(firstAddress);
     const firstTd = this.cellElements.get(firstAddress);
 
     if (firstTd) {
@@ -1439,16 +1643,19 @@ export class DomRenderer {
     const bounds = this.selectionManager.getSelectionBounds();
     if (!bounds) return;
 
+    // 将 camelCase 转换为 kebab-case
+    const cssProperty = property.replace(/([A-Z])/g, '-$1').toLowerCase();
+
     for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
       for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
         const td = this.cellElements.get(this.formatAddress(row, col));
         if (td) {
           // 切换样式（如果已有则移除）
-          const currentValue = td.style.getPropertyValue(property) || (td.style as unknown as Record<string, string>)[property];
+          const currentValue = td.style.getPropertyValue(cssProperty) || (td.style as unknown as Record<string, string>)[property];
           if (currentValue === value) {
-            td.style.setProperty(property, '');
+            (td.style as unknown as Record<string, string>)[property] = '';
           } else {
-            td.style.setProperty(property, value);
+            (td.style as unknown as Record<string, string>)[property] = value;
           }
         }
       }
@@ -1601,7 +1808,7 @@ export class DomRenderer {
     }
   }
 
-  private showFilterMenu(col: number, anchor: HTMLElement): void {
+  private showFilterMenu(_col: number, anchor: HTMLElement): void {
     // 简单的筛选菜单
     const menu = document.createElement('div');
     menu.style.cssText = `
@@ -1644,5 +1851,810 @@ export class DomRenderer {
 
     const order = confirm('点击"确定"升序排列，点击"取消"降序排列') ? 'asc' : 'desc';
     this.sortRange(bounds, order);
+  }
+
+  // ==================== 新增功能实现 ====================
+
+  /**
+   * 横向合并（每行单独合并）
+   */
+  private mergeHorizontal(bounds: { start: { row: number; col: number }; end: { row: number; col: number } }): void {
+    for (let row = bounds.start.row; row <= bounds.end.row; row++) {
+      this.mergeCells({
+        start: { row, col: bounds.start.col },
+        end: { row, col: bounds.end.col }
+      });
+    }
+  }
+
+  /**
+   * 纵向合并（每列单独合并）
+   */
+  private mergeVertical(bounds: { start: { row: number; col: number }; end: { row: number; col: number } }): void {
+    for (let col = bounds.start.col; col <= bounds.end.col; col++) {
+      this.mergeCells({
+        start: { row: bounds.start.row, col },
+        end: { row: bounds.end.row, col }
+      });
+    }
+  }
+
+  /**
+   * 设置列宽
+   */
+  private setColumnWidth(col: number, width: number): void {
+    if (!this.sheet) return;
+    if (!this.sheet.columns) this.sheet.columns = new Map();
+
+    const colDef = this.sheet.columns.get(col) || { width: 10 };
+    colDef.pixelWidth = width;
+    this.sheet.columns.set(col, colDef);
+
+    // 更新 DOM
+    const colgroup = this.table?.querySelector('colgroup');
+    if (colgroup) {
+      const colEl = colgroup.children[this.options.showRowHeaders ? col + 1 : col] as HTMLElement;
+      if (colEl) {
+        colEl.style.width = `${width}px`;
+      }
+    }
+  }
+
+  /**
+   * 显示行高设置对话框
+   */
+  private showRowHeightDialog(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    const currentHeight = this.options.defaultRowHeight;
+    const input = prompt(`设置行高 (当前: ${currentHeight}px):`, String(currentHeight));
+    if (!input) return;
+
+    const height = parseInt(input, 10);
+    if (isNaN(height) || height < 10 || height > 500) {
+      alert('请输入有效的行高 (10-500)');
+      return;
+    }
+
+    this.setRowsHeight(bounds.start.row, bounds.end.row, height);
+  }
+
+  /**
+   * 设置行高
+   */
+  private setRowsHeight(startRow: number, endRow: number, height: number): void {
+    if (!this.sheet) return;
+    if (!this.sheet.rows) this.sheet.rows = new Map();
+
+    for (let row = startRow; row <= endRow; row++) {
+      const rowDef = this.sheet.rows.get(row) || {};
+      rowDef.height = height;
+      this.sheet.rows.set(row, rowDef);
+
+      // 更新 DOM
+      const tbody = this.table?.querySelector('tbody');
+      if (tbody) {
+        const tr = tbody.children[row] as HTMLElement;
+        if (tr) {
+          tr.style.height = `${height}px`;
+        }
+      }
+    }
+  }
+
+  /**
+   * 显示列宽设置对话框
+   */
+  private showColumnWidthDialog(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    const currentWidth = this.options.defaultColWidth;
+    const input = prompt(`设置列宽 (当前: ${currentWidth}px):`, String(currentWidth));
+    if (!input) return;
+
+    const width = parseInt(input, 10);
+    if (isNaN(width) || width < 20 || width > 500) {
+      alert('请输入有效的列宽 (20-500)');
+      return;
+    }
+
+    for (let col = bounds.start.col; col <= bounds.end.col; col++) {
+      this.setColumnWidth(col, width);
+    }
+  }
+
+  /**
+   * 清除所有筛选
+   */
+  private clearAllFilters(): void {
+    const filterBtns = this.tableContainer?.querySelectorAll('.filter-btn');
+    filterBtns?.forEach(btn => btn.remove());
+
+    // 显示所有隐藏的行
+    this.showAllRows();
+  }
+
+  /**
+   * 显示设置单元格格式对话框
+   */
+  private showFormatCellsDialog(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    const dialog = this.createDialog('设置单元格格式', `
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">数字格式:</label>
+          <select id="numberFormat" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="">常规</option>
+            <option value="number">数字 (1,234.56)</option>
+            <option value="currency">货币 (¥1,234.56)</option>
+            <option value="percent">百分比 (12.34%)</option>
+            <option value="date">日期 (2024-01-01)</option>
+            <option value="time">时间 (12:30:00)</option>
+          </select>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">字体:</label>
+          <select id="fontFamily" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="微软雅黑">微软雅黑</option>
+            <option value="宋体">宋体</option>
+            <option value="黑体">黑体</option>
+            <option value="Arial">Arial</option>
+            <option value="Times New Roman">Times New Roman</option>
+          </select>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">字号:</label>
+          <input type="number" id="fontSize" value="14" min="8" max="72" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <label style="display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="bold"> 粗体
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="italic"> 斜体
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="underline"> 下划线
+          </label>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">对齐方式:</label>
+          <div style="display: flex; gap: 8px;">
+            <select id="hAlign" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+              <option value="left">左对齐</option>
+              <option value="center">居中</option>
+              <option value="right">右对齐</option>
+            </select>
+            <select id="vAlign" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+              <option value="top">顶端</option>
+              <option value="middle">居中</option>
+              <option value="bottom">底端</option>
+            </select>
+          </div>
+        </div>
+        <div style="display: flex; gap: 12px;">
+          <div style="flex: 1;">
+            <label style="display: block; margin-bottom: 4px; font-weight: 500;">文字颜色:</label>
+            <input type="color" id="textColor" value="#000000" style="width: 100%; height: 36px; border: 1px solid #ddd; border-radius: 4px;">
+          </div>
+          <div style="flex: 1;">
+            <label style="display: block; margin-bottom: 4px; font-weight: 500;">背景颜色:</label>
+            <input type="color" id="bgColor" value="#ffffff" style="width: 100%; height: 36px; border: 1px solid #ddd; border-radius: 4px;">
+          </div>
+        </div>
+      </div>
+    `, () => {
+      const fontFamily = (document.getElementById('fontFamily') as HTMLSelectElement).value;
+      const fontSize = (document.getElementById('fontSize') as HTMLInputElement).value;
+      const bold = (document.getElementById('bold') as HTMLInputElement).checked;
+      const italic = (document.getElementById('italic') as HTMLInputElement).checked;
+      const underline = (document.getElementById('underline') as HTMLInputElement).checked;
+      const hAlign = (document.getElementById('hAlign') as HTMLSelectElement).value;
+      const vAlign = (document.getElementById('vAlign') as HTMLSelectElement).value;
+      const textColor = (document.getElementById('textColor') as HTMLInputElement).value;
+      const bgColor = (document.getElementById('bgColor') as HTMLInputElement).value;
+      const numberFormat = (document.getElementById('numberFormat') as HTMLSelectElement).value;
+
+      // 应用格式
+      if (fontFamily) this.applyFormat('fontFamily', fontFamily);
+      if (fontSize) this.applyFormat('fontSize', `${fontSize}px`);
+      if (bold) this.applyFormat('fontWeight', 'bold');
+      if (italic) this.applyFormat('fontStyle', 'italic');
+      if (underline) this.applyFormat('textDecoration', 'underline');
+      if (hAlign) this.applyFormat('textAlign', hAlign);
+      if (vAlign) this.applyFormat('verticalAlign', vAlign);
+      if (textColor !== '#000000') this.applyFormat('color', textColor);
+      if (bgColor !== '#ffffff') this.applyFormat('backgroundColor', bgColor);
+      if (numberFormat) this.applyNumberFormat(numberFormat as 'percent' | 'currency' | 'date');
+    });
+  }
+
+  /**
+   * 显示插入链接对话框
+   */
+  private showInsertLinkDialog(): void {
+    const dialog = this.createDialog('插入链接', `
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">显示文本:</label>
+          <input type="text" id="linkText" placeholder="链接显示文本" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">链接地址:</label>
+          <input type="url" id="linkUrl" placeholder="https://example.com" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+      </div>
+    `, () => {
+      const text = (document.getElementById('linkText') as HTMLInputElement).value;
+      const url = (document.getElementById('linkUrl') as HTMLInputElement).value;
+      if (url) {
+        this.insertLink(url);
+        if (text) {
+          const activeCell = this.selectionManager.getActiveCell();
+          const td = this.cellElements.get(this.formatAddress(activeCell.row, activeCell.col));
+          const link = td?.querySelector('a');
+          if (link) link.textContent = text;
+        }
+      }
+    });
+  }
+
+  /**
+   * 显示插入图片对话框
+   */
+  private showInsertImageDialog(): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          this.insertImage(reader.result as string);
+        };
+        reader.readAsDataURL(file);
+      }
+    };
+    input.click();
+  }
+
+  /**
+   * 清除批注
+   */
+  private clearSelectedComments(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    for (let row = bounds.start.row; row <= bounds.end.row; row++) {
+      for (let col = bounds.start.col; col <= bounds.end.col; col++) {
+        const td = this.cellElements.get(this.formatAddress(row, col));
+        if (td) {
+          td.title = '';
+          const marker = td.querySelector('div[style*="border-top: 6px solid #ff6b6b"]');
+          marker?.remove();
+        }
+      }
+    }
+  }
+
+  /**
+   * 清除超链接
+   */
+  private clearSelectedHyperlinks(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    for (let row = bounds.start.row; row <= bounds.end.row; row++) {
+      for (let col = bounds.start.col; col <= bounds.end.col; col++) {
+        const td = this.cellElements.get(this.formatAddress(row, col));
+        if (td) {
+          const link = td.querySelector('a');
+          if (link) {
+            td.textContent = link.textContent;
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * 显示数据验证对话框
+   */
+  private showDataValidationDialog(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    const dialog = this.createDialog('数据验证', `
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">验证类型:</label>
+          <select id="validationType" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="list">列表 (下拉选择)</option>
+            <option value="number">数字范围</option>
+            <option value="textLength">文本长度</option>
+            <option value="date">日期范围</option>
+          </select>
+        </div>
+        <div id="listOptions">
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">列表选项 (用逗号分隔):</label>
+          <input type="text" id="listValues" placeholder="选项1,选项2,选项3" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+        <div id="numberOptions" style="display: none;">
+          <div style="display: flex; gap: 8px;">
+            <div style="flex: 1;">
+              <label style="display: block; margin-bottom: 4px;">最小值:</label>
+              <input type="number" id="minValue" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+            <div style="flex: 1;">
+              <label style="display: block; margin-bottom: 4px;">最大值:</label>
+              <input type="number" id="maxValue" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            </div>
+          </div>
+        </div>
+        <div>
+          <label style="display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="allowBlank" checked> 允许空白
+          </label>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">错误提示:</label>
+          <input type="text" id="errorMessage" placeholder="输入无效" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+        </div>
+      </div>
+    `, () => {
+      const type = (document.getElementById('validationType') as HTMLSelectElement).value as 'list' | 'number' | 'date' | 'textLength';
+      const allowBlank = (document.getElementById('allowBlank') as HTMLInputElement).checked;
+      const errorMessage = (document.getElementById('errorMessage') as HTMLInputElement).value;
+
+      let criteria: any = {};
+      if (type === 'list') {
+        criteria.values = (document.getElementById('listValues') as HTMLInputElement).value.split(',').map(v => v.trim());
+      } else if (type === 'number') {
+        criteria.min = parseFloat((document.getElementById('minValue') as HTMLInputElement).value);
+        criteria.max = parseFloat((document.getElementById('maxValue') as HTMLInputElement).value);
+      }
+
+      // 保存验证规则
+      for (let row = bounds.start.row; row <= bounds.end.row; row++) {
+        for (let col = bounds.start.col; col <= bounds.end.col; col++) {
+          const address = this.formatAddress(row, col);
+          this.dataValidations.set(address, {
+            type,
+            criteria,
+            allowBlank,
+            showError: true,
+            errorMessage
+          });
+
+          // 如果是列表类型，添加下拉指示器
+          if (type === 'list') {
+            this.addDropdownIndicator(row, col, criteria.values);
+          }
+        }
+      }
+    });
+
+    // 切换验证类型时显示不同选项
+    const typeSelect = document.getElementById('validationType');
+    typeSelect?.addEventListener('change', (e) => {
+      const type = (e.target as HTMLSelectElement).value;
+      document.getElementById('listOptions')!.style.display = type === 'list' ? 'block' : 'none';
+      document.getElementById('numberOptions')!.style.display = type === 'number' ? 'block' : 'none';
+    });
+  }
+
+  /**
+   * 添加下拉指示器
+   */
+  private addDropdownIndicator(row: number, col: number, values: string[]): void {
+    const td = this.cellElements.get(this.formatAddress(row, col));
+    if (!td) return;
+
+    // 移除旧的指示器
+    td.querySelector('.dropdown-indicator')?.remove();
+
+    const indicator = document.createElement('span');
+    indicator.className = 'dropdown-indicator';
+    indicator.innerHTML = '▼';
+    indicator.style.cssText = `
+      position: absolute;
+      right: 4px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 10px;
+      color: #999;
+      cursor: pointer;
+    `;
+    td.style.position = 'relative';
+
+    indicator.onclick = (e) => {
+      e.stopPropagation();
+      this.showDropdownMenu(td, values, row, col);
+    };
+
+    td.appendChild(indicator);
+  }
+
+  /**
+   * 显示下拉菜单
+   */
+  private showDropdownMenu(td: HTMLElement, values: string[], row: number, col: number): void {
+    // 移除旧菜单
+    document.querySelectorAll('.validation-dropdown').forEach(m => m.remove());
+
+    const rect = td.getBoundingClientRect();
+    const menu = document.createElement('div');
+    menu.className = 'validation-dropdown';
+    menu.style.cssText = `
+      position: fixed;
+      left: ${rect.left}px;
+      top: ${rect.bottom}px;
+      min-width: ${rect.width}px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 99999;
+      max-height: 200px;
+      overflow-y: auto;
+    `;
+
+    values.forEach(value => {
+      const item = document.createElement('div');
+      item.textContent = value;
+      item.style.cssText = `
+        padding: 8px 12px;
+        cursor: pointer;
+        border-bottom: 1px solid #f0f0f0;
+      `;
+      item.onmouseover = () => item.style.background = '#f5f5f5';
+      item.onmouseout = () => item.style.background = '';
+      item.onclick = () => {
+        this.setCellValue(row, col, value);
+        menu.remove();
+      };
+      menu.appendChild(item);
+    });
+
+    document.body.appendChild(menu);
+
+    // 点击外部关闭
+    setTimeout(() => {
+      const close = (e: MouseEvent) => {
+        if (!menu.contains(e.target as Node)) {
+          menu.remove();
+          document.removeEventListener('click', close);
+        }
+      };
+      document.addEventListener('click', close);
+    }, 0);
+  }
+
+  /**
+   * 清除数据验证
+   */
+  private clearDataValidation(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    for (let row = bounds.start.row; row <= bounds.end.row; row++) {
+      for (let col = bounds.start.col; col <= bounds.end.col; col++) {
+        const address = this.formatAddress(row, col);
+        this.dataValidations.delete(address);
+
+        // 移除下拉指示器
+        const td = this.cellElements.get(address);
+        td?.querySelector('.dropdown-indicator')?.remove();
+      }
+    }
+  }
+
+  /**
+   * 圈释无效数据
+   */
+  private circleInvalidData(): void {
+    this.dataValidations.forEach((validation, address) => {
+      const td = this.cellElements.get(address);
+      if (!td) return;
+
+      const value = td.textContent || '';
+      let isValid = true;
+
+      if (!value && !validation.allowBlank) {
+        isValid = false;
+      } else if (value) {
+        switch (validation.type) {
+          case 'list':
+            isValid = validation.criteria.values.includes(value);
+            break;
+          case 'number':
+            const num = parseFloat(value);
+            isValid = !isNaN(num) && num >= validation.criteria.min && num <= validation.criteria.max;
+            break;
+        }
+      }
+
+      if (!isValid) {
+        td.style.outline = '2px solid red';
+        td.style.outlineOffset = '-2px';
+      } else {
+        td.style.outline = '';
+        td.style.outlineOffset = '';
+      }
+    });
+  }
+
+  /**
+   * 显示条件格式对话框
+   */
+  private showConditionalFormatDialog(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    const dialog = this.createDialog('条件格式', `
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">格式类型:</label>
+          <select id="formatType" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="cellValue">单元格值</option>
+            <option value="colorScale">色阶</option>
+            <option value="dataBar">数据条</option>
+          </select>
+        </div>
+        <div id="cellValueOptions">
+          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <select id="operator" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+              <option value="greater">大于</option>
+              <option value="less">小于</option>
+              <option value="equal">等于</option>
+              <option value="between">介于</option>
+            </select>
+            <input type="text" id="value1" placeholder="值" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <input type="text" id="value2" placeholder="到" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px; display: none;">
+          </div>
+          <div>
+            <label style="display: block; margin-bottom: 4px;">格式颜色:</label>
+            <div style="display: flex; gap: 8px;">
+              <input type="color" id="condBgColor" value="#ffeb9c" title="背景色" style="flex: 1; height: 36px;">
+              <input type="color" id="condTextColor" value="#9c5700" title="文字色" style="flex: 1; height: 36px;">
+            </div>
+          </div>
+        </div>
+      </div>
+    `, () => {
+      const formatType = (document.getElementById('formatType') as HTMLSelectElement).value;
+      const operator = (document.getElementById('operator') as HTMLSelectElement).value;
+      const value1 = (document.getElementById('value1') as HTMLInputElement).value;
+      const bgColor = (document.getElementById('condBgColor') as HTMLInputElement).value;
+      const textColor = (document.getElementById('condTextColor') as HTMLInputElement).value;
+
+      const rule = {
+        id: `cf_${Date.now()}`,
+        range: {
+          startRow: bounds.start.row,
+          startCol: bounds.start.col,
+          endRow: bounds.end.row,
+          endCol: bounds.end.col
+        },
+        type: formatType as 'cellValue' | 'colorScale' | 'dataBar' | 'iconSet' | 'formula',
+        rule: { operator, value: parseFloat(value1) || value1 },
+        format: {
+          fill: { fgColor: bgColor },
+          font: { color: textColor }
+        }
+      };
+
+      this.conditionalFormats.push(rule);
+      this.applyConditionalFormats();
+    });
+
+    // 切换操作符时显示第二个值输入框
+    const operatorSelect = document.getElementById('operator');
+    operatorSelect?.addEventListener('change', (e) => {
+      const value2Input = document.getElementById('value2') as HTMLElement;
+      value2Input.style.display = (e.target as HTMLSelectElement).value === 'between' ? 'block' : 'none';
+    });
+  }
+
+  /**
+   * 应用条件格式
+   */
+  private applyConditionalFormats(): void {
+    this.conditionalFormats.forEach(cf => {
+      for (let row = cf.range.startRow; row <= cf.range.endRow; row++) {
+        for (let col = cf.range.startCol; col <= cf.range.endCol; col++) {
+          const address = this.formatAddress(row, col);
+          const td = this.cellElements.get(address);
+          if (!td) continue;
+
+          const cellValue = parseFloat(td.textContent || '');
+          let match = false;
+
+          if (cf.type === 'cellValue' && !isNaN(cellValue)) {
+            const ruleValue = cf.rule.value;
+            switch (cf.rule.operator) {
+              case 'greater': match = cellValue > ruleValue; break;
+              case 'less': match = cellValue < ruleValue; break;
+              case 'equal': match = cellValue === ruleValue; break;
+            }
+          }
+
+          if (match) {
+            if (cf.format.fill?.fgColor) {
+              td.style.backgroundColor = cf.format.fill.fgColor as string;
+            }
+            if (cf.format.font?.color) {
+              td.style.color = cf.format.font.color as string;
+            }
+          }
+        }
+      }
+    });
+  }
+
+  /**
+   * 清除条件格式
+   */
+  private clearConditionalFormats(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    // 移除匹配范围的条件格式
+    this.conditionalFormats = this.conditionalFormats.filter(cf => {
+      const overlaps = !(cf.range.endRow < bounds.start.row || cf.range.startRow > bounds.end.row ||
+        cf.range.endCol < bounds.start.col || cf.range.startCol > bounds.end.col);
+      return !overlaps;
+    });
+
+    // 清除格式
+    for (let row = bounds.start.row; row <= bounds.end.row; row++) {
+      for (let col = bounds.start.col; col <= bounds.end.col; col++) {
+        const td = this.cellElements.get(this.formatAddress(row, col));
+        if (td) {
+          td.style.backgroundColor = '';
+          td.style.color = '';
+        }
+      }
+    }
+  }
+
+  /**
+   * 显示自定义排序对话框
+   */
+  private showCustomSortDialog(): void {
+    const bounds = this.selectionManager.getSelectionBounds();
+    if (!bounds) return;
+
+    const colCount = bounds.end.col - bounds.start.col + 1;
+    let colOptions = '';
+    for (let i = 0; i < colCount; i++) {
+      const colLabel = this.getColumnLabel(bounds.start.col + i);
+      colOptions += `<option value="${i}">列 ${colLabel}</option>`;
+    }
+
+    const dialog = this.createDialog('自定义排序', `
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div>
+          <label style="display: flex; align-items: center; gap: 4px;">
+            <input type="checkbox" id="hasHeader" checked> 数据包含标题行
+          </label>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">排序列:</label>
+          <select id="sortColumn" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            ${colOptions}
+          </select>
+        </div>
+        <div>
+          <label style="display: block; margin-bottom: 4px; font-weight: 500;">排序顺序:</label>
+          <select id="sortOrder" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="asc">升序 (A → Z)</option>
+            <option value="desc">降序 (Z → A)</option>
+          </select>
+        </div>
+      </div>
+    `, () => {
+      const hasHeader = (document.getElementById('hasHeader') as HTMLInputElement).checked;
+      const sortCol = parseInt((document.getElementById('sortColumn') as HTMLSelectElement).value, 10);
+      const order = (document.getElementById('sortOrder') as HTMLSelectElement).value as 'asc' | 'desc';
+
+      const sortBounds = {
+        start: { row: hasHeader ? bounds.start.row + 1 : bounds.start.row, col: bounds.start.col },
+        end: { row: bounds.end.row, col: bounds.end.col }
+      };
+
+      this.sortRangeByColumn(sortBounds, bounds.start.col + sortCol, order);
+    });
+  }
+
+  /**
+   * 按指定列排序
+   */
+  private sortRangeByColumn(bounds: { start: { row: number; col: number }; end: { row: number; col: number } }, sortCol: number, order: 'asc' | 'desc'): void {
+    if (!this.sheet) return;
+
+    const rows: { row: number; values: string[]; sortValue: string }[] = [];
+
+    for (let row = bounds.start.row; row <= Math.min(bounds.end.row, 1000); row++) {
+      const values: string[] = [];
+      for (let col = bounds.start.col; col <= Math.min(bounds.end.col, 100); col++) {
+        const address = this.formatAddress(row, col);
+        const cell = this.sheet.cells.get(address);
+        values.push(cell?.text ?? '');
+      }
+      const sortAddress = this.formatAddress(row, sortCol);
+      const sortCell = this.sheet.cells.get(sortAddress);
+      rows.push({ row, values, sortValue: sortCell?.text ?? '' });
+    }
+
+    rows.sort((a, b) => {
+      const comparison = a.sortValue.localeCompare(b.sortValue, 'zh-CN', { numeric: true });
+      return order === 'asc' ? comparison : -comparison;
+    });
+
+    rows.forEach((rowData, newIndex) => {
+      const newRow = bounds.start.row + newIndex;
+      rowData.values.forEach((value, colIndex) => {
+        const col = bounds.start.col + colIndex;
+        this.setCellValue(newRow, col, value);
+      });
+    });
+  }
+
+  /**
+   * 创建通用对话框
+   */
+  private createDialog(title: string, content: string, onConfirm: () => void): HTMLElement {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100000;
+    `;
+
+    const dialog = document.createElement('div');
+    dialog.style.cssText = `
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+      min-width: 400px;
+      max-width: 500px;
+    `;
+
+    dialog.innerHTML = `
+      <div style="padding: 16px 20px; border-bottom: 1px solid #e5e7eb; font-weight: 600; font-size: 16px;">${title}</div>
+      <div style="padding: 20px;">${content}</div>
+      <div style="padding: 12px 20px; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 8px;">
+        <button id="dialogCancel" style="padding: 8px 16px; border: 1px solid #ddd; border-radius: 4px; background: white; cursor: pointer;">取消</button>
+        <button id="dialogConfirm" style="padding: 8px 16px; border: none; border-radius: 4px; background: #217346; color: white; cursor: pointer;">确定</button>
+      </div>
+    `;
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    const close = () => overlay.remove();
+    dialog.querySelector('#dialogCancel')?.addEventListener('click', close);
+    dialog.querySelector('#dialogConfirm')?.addEventListener('click', () => {
+      onConfirm();
+      close();
+    });
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close();
+    });
+
+    return dialog;
   }
 }

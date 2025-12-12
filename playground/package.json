@@ -10,7 +10,10 @@
   "dependencies": {
     "@excel-viewer/core": "workspace:*",
     "@excel-viewer/vue": "workspace:*",
-    "vue": "^3.3.4"
+    "vue": "^3.3.4",
+    "vue-router": "^4.2.5",
+    "lucide-vue-next": "^0.294.0",
+    "highlight.js": "^11.9.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^4.5.0",

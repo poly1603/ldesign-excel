@@ -26,8 +26,10 @@ import { ExcelParser } from './parser/ExcelParser';
 import { SheetRenderer } from './renderer/SheetRenderer';
 import { DomRenderer } from './renderer/DomRenderer';
 import { EventEmitter, type EventListener } from './events/EventEmitter';
-import { Toolbar, createDefaultToolbarItems } from './core/ui/Toolbar';
+import { Toolbar } from './core/ui/Toolbar';
 import { FormulaBar } from './core/ui/FormulaBar';
+import { SpreadsheetToolbar, type ToolbarAction } from './core/ui/SpreadsheetToolbar';
+import { CellContextMenu, type CellInfo, type CellContextMenuAction } from './core/ui/CellContextMenu';
 
 /**
  * 渲染模式
@@ -77,8 +79,12 @@ export class ExcelViewer {
 
   // 工具栏和公式栏
   private toolbar: Toolbar | null = null;
+  private spreadsheetToolbar: SpreadsheetToolbar | null = null;
   private formulaBar: FormulaBar | null = null;
   private formulaBarElement: HTMLElement | null = null;
+
+  // 右键菜单
+  private cellContextMenu: CellContextMenu | null = null;
 
   // 状态
   private isLoading: boolean = false;
@@ -158,10 +164,16 @@ export class ExcelViewer {
       this.toolbarElement.style.cssText = `flex-shrink: 0;`;
       this.rootElement.appendChild(this.toolbarElement);
 
-      // 创建 Toolbar 组件
-      this.toolbar = new Toolbar(this.toolbarElement, {
-        items: createDefaultToolbarItems(),
-        onAction: (id, value) => this.handleToolbarAction(id, value)
+      // 创建新版 SpreadsheetToolbar（包含头部栏和格式工具栏）
+      this.spreadsheetToolbar = new SpreadsheetToolbar(this.toolbarElement, {
+        fileName: '未命名工作簿',
+        sheetCount: 1,
+        zoom: Math.round(this.renderOptions.zoom * 100),
+        readonly: this.options.readonly,
+        showFileBar: true,
+        onAction: (action: ToolbarAction) => this.handleToolbarAction(action.id, action.value),
+        onZoomChange: (zoom: number) => this.setZoom(zoom),
+        onOpenFile: () => this.emitOpenFileRequest()
       });
 
       // 创建公式栏
@@ -174,6 +186,14 @@ export class ExcelViewer {
         onConfirm: (value: string) => this.handleFormulaConfirm(value)
       });
     }
+
+    // 创建右键菜单
+    this.cellContextMenu = new CellContextMenu({
+      readonly: this.options.readonly,
+      onAction: (action: CellContextMenuAction, cellInfo: CellInfo) => {
+        this.handleContextMenuAction(action.id, cellInfo);
+      }
+    });
 
     // 创建主视图容器
     const viewContainer = document.createElement('div');
@@ -587,10 +607,9 @@ export class ExcelViewer {
    * 更新文件信息
    */
   private updateFileInfo(): void {
-    const fileInfo = this.toolbarElement?.querySelector('.excel-viewer-file-info');
-    if (fileInfo && this.workbook) {
+    if (this.spreadsheetToolbar && this.workbook) {
       const sheetCount = this.workbook.sheets.length;
-      fileInfo.textContent = `${sheetCount} 个工作表`;
+      this.spreadsheetToolbar.setSheetCount(sheetCount);
     }
   }
 
@@ -760,6 +779,25 @@ export class ExcelViewer {
     const address = this.formatAddress(row, col);
     const cell = sheet?.cells.get(address) || null;
 
+    // 显示右键菜单
+    if (this.cellContextMenu) {
+      const selectionBounds = this.selection ? {
+        startRow: this.selection.start.row,
+        startCol: this.selection.start.col,
+        endRow: this.selection.end.row,
+        endCol: this.selection.end.col
+      } : undefined;
+
+      this.cellContextMenu.show(event.clientX, event.clientY, {
+        row,
+        col,
+        address,
+        value: cell?.text || '',
+        hasSelection: !!this.selection,
+        selectionBounds
+      });
+    }
+
     this.emit<CellClickEvent>({
       type: 'cellRightClick',
       timestamp: Date.now(),
@@ -905,9 +943,8 @@ export class ExcelViewer {
    * 更新缩放标签
    */
   private updateZoomLabel(): void {
-    const label = this.toolbarElement?.querySelector('.excel-viewer-zoom-label');
-    if (label) {
-      label.textContent = `${Math.round(this.renderOptions.zoom * 100)}%`;
+    if (this.spreadsheetToolbar) {
+      this.spreadsheetToolbar.setZoom(Math.round(this.renderOptions.zoom * 100));
     }
   }
 
@@ -1137,6 +1174,108 @@ export class ExcelViewer {
   }
 
   /**
+   * 发送打开文件请求事件
+   */
+  private emitOpenFileRequest(): void {
+    // 触发文件选择
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls,.xlsm,.xlsb,.csv';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        await this.loadFile(file);
+      }
+    };
+    input.click();
+  }
+
+  /**
+   * 处理右键菜单操作
+   */
+  private handleContextMenuAction(actionId: string, cellInfo: CellInfo): void {
+    if (!this.domRenderer) return;
+
+    switch (actionId) {
+      // 剪贴板操作
+      case 'cut':
+        this.domRenderer.applyFormat('', ''); // 触发剪切
+        break;
+      case 'copy':
+        this.copySelection();
+        break;
+      case 'paste':
+        // 粘贴操作
+        break;
+
+      // 清除操作
+      case 'clearContents':
+        // 清除选区内容
+        break;
+      case 'clearFormats':
+        // 清除格式
+        break;
+
+      // 插入操作
+      case 'insertRowAbove':
+      case 'insertRowBelow':
+      case 'insertColLeft':
+      case 'insertColRight':
+        // 插入行列
+        break;
+
+      // 删除操作
+      case 'deleteRow':
+      case 'deleteCol':
+        // 删除行列
+        break;
+
+      // 格式操作
+      case 'formatCells':
+        // 打开格式对话框
+        break;
+
+      // 合并单元格
+      case 'mergeAll':
+        this.domRenderer.mergeSelectedCells();
+        break;
+      case 'unmergeCells':
+        // 取消合并
+        break;
+
+      // 排序
+      case 'sortAsc':
+        this.domRenderer.showSortDialog();
+        break;
+      case 'sortDesc':
+        this.domRenderer.showSortDialog();
+        break;
+
+      // 筛选
+      case 'addFilter':
+        this.domRenderer.toggleFilter();
+        break;
+
+      // 插入内容
+      case 'insertComment':
+        this.domRenderer.insertComment();
+        break;
+      case 'insertLink':
+        this.showInsertLinkDialog();
+        break;
+      case 'insertImage':
+        this.showInsertImageDialog();
+        break;
+      case 'insertChart':
+        this.showInsertChartDialog();
+        break;
+
+      default:
+        console.log('Context menu action:', actionId, cellInfo);
+    }
+  }
+
+  /**
    * 处理公式栏值变化
    */
   private handleFormulaChange(_value: string): void {
@@ -1189,6 +1328,14 @@ export class ExcelViewer {
     this.resizeObserver?.disconnect();
     this.emitter.removeAllListeners();
 
+    // 销毁工具栏
+    this.spreadsheetToolbar?.destroy();
+    this.toolbar?.destroy();
+    this.formulaBar?.destroy();
+
+    // 销毁右键菜单
+    this.cellContextMenu?.destroy();
+
     // 移除 DOM
     if (this.rootElement) {
       this.rootElement.remove();
@@ -1196,5 +1343,9 @@ export class ExcelViewer {
 
     this.workbook = null;
     this.renderer = null;
+    this.spreadsheetToolbar = null;
+    this.toolbar = null;
+    this.formulaBar = null;
+    this.cellContextMenu = null;
   }
 }

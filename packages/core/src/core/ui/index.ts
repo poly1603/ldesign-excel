@@ -13,3 +13,15 @@ export type { FormulaBarOptions } from './FormulaBar';
 
 export { FormatDialog } from './FormatDialog';
 export type { FormatDialogOptions, CellFormat } from './FormatDialog';
+
+export { SpreadsheetToolbar } from './SpreadsheetToolbar';
+export type { SpreadsheetToolbarOptions, ToolbarAction } from './SpreadsheetToolbar';
+
+export { CellContextMenu, createCellContextMenu } from './CellContextMenu';
+export type { CellContextMenuOptions, CellContextMenuAction, CellInfo, ContextMenuItem } from './CellContextMenu';
+
+export { Dialog, alert, confirm, prompt } from './Dialog';
+export type { DialogOptions, DialogButton, AlertOptions, ConfirmOptions, PromptOptions } from './Dialog';
+
+export { Dropdown, showMenu } from './Dropdown';
+export type { DropdownOptions, DropdownItem, PopupMenuOptions } from './Dropdown';

@@ -68,8 +68,9 @@ export class ContextMenu {
   }
 
   private handleDocumentContextMenu(_e: MouseEvent): void {
-    // 右键点击时先关闭现有菜单
-    if (this.menuElement) {
+    // 右键点击时关闭现有菜单（如果菜单已经可见，说明这是新的右键点击）
+    // 但如果菜单刚刚创建（showPending），则不关闭
+    if (this.menuElement && this.visible) {
       this.hide();
     }
   }
@@ -82,6 +83,7 @@ export class ContextMenu {
     this.hide();
 
     this.menuElement = this.createMenuElement();
+    this.visible = false; // 标记为待显示状态
     document.body.appendChild(this.menuElement);
 
     // 调整位置确保菜单在可视区域内
@@ -103,9 +105,9 @@ export class ContextMenu {
     this.menuElement.style.top = `${Math.max(0, top)}px`;
 
     // 延迟设置 visible，避免被同一次事件的 document contextmenu 处理器关闭
-    requestAnimationFrame(() => {
+    setTimeout(() => {
       this.visible = true;
-    });
+    }, 0);
   }
 
   /**
